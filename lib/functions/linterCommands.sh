@@ -99,6 +99,7 @@ DOTNET_FORMAT_COMMAND=(dotnet format)
 
 LINTER_COMMANDS_ARRAY_ANSIBLE=(ansible-lint -c "${ANSIBLE_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_ARM=(pwsh -NoProfile -NoLogo -Command "\"Import-Module ${ARM_TTK_PSD1} ; \\\${config} = \\\$(Import-PowerShellDataFile -Path ${ARM_LINTER_RULES}) ; Test-AzTemplate @config -TemplatePath '{}'; if (\\\${Error}.Count) { exit 1 }\"")
+LINTER_COMMANDS_ARRAY_BICEP=(az bicep lint --file '{}')
 LINTER_COMMANDS_ARRAY_BASH=(shellcheck --color --rcfile "${BASH_LINTER_RULES}")
 # This check and the BASH_SEVERITY variable are needed until Shellcheck supports
 # setting severity using its config file.

@@ -1,0 +1,48 @@
+# Documentation:
+# - Bicep Linter https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/linter
+# - Bicep transpiles to ARM templates
+
+@{
+    # Test = @(
+    #     'adminusername-should-not-be-literal',
+    #     'artifacts-parameters',
+    #     'decompiler-cleanup',
+    #     'explicit-values-for-loc-params',
+    #     'max-asserts',
+    #     'max-outputs',
+    #     'max-params',
+    #     'max-resources',
+    #     'max-variables',
+    #     'nested-deployment-template-scoping',
+    #     'no-conflicting-metadata',
+    #     'no-deployments-resources',
+    #     'no-hardcoded-env-urls',
+    #     'no-hardcoded-location',
+    #     'no-loc-expr-outside-params',
+    #     'no-unnecessary-dependson',
+    #     'no-unused-existing-resources',
+    #     'no-unused-imports',
+    #     'no-unused-params',
+    #     'no-unused-vars',
+    #     'outputs-should-not-contain-secrets',
+    #     'prefer-interpolation',
+    #     'prefer-unquoted-property-names',
+    #     'protect-commandtoexecute-secrets',
+    #     'secure-parameter-default',
+    #     'secure-params-in-nested-deploy',
+    #     'secure-secrets-in-params',
+    #     'simplify-interpolation',
+    #     'simplify-json-null',
+    #     'use-parent-property',
+    #     'use-recent-api-versions',
+    #     'use-recent-module-versions',
+    #     'use-resource-id-functions',
+    #     'use-resource-symbol-reference',
+    #     'use-safe-access',
+    #     'use-secure-value-for-secure-inputs',
+    #     'use-stable-resource-identifiers',
+    #     'use-stable-vm-image',
+    #     'what-if-short-circuiting',
+    # )
+    # Skip = @()
+}

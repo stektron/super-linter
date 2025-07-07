@@ -457,6 +457,10 @@ BuildFileArrays() {
         echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-ARM"
       fi
 
+      if DetectBicepFile "${FILE}"; then
+        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-BICEP"
+      fi
+
       if DetectCloudFormationFile "${FILE}"; then
         echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-CLOUDFORMATION"
       fi

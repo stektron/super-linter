@@ -56,6 +56,26 @@ DetectARMFile() {
   fi
 }
 
+DetectBicepFile() {
+  FILE="${1}"
+
+  FILE_EXTENSION="$(GetFileExtension "$FILE")"
+
+  if [ "${VALIDATE_BICEP}" == "false" ]; then
+    debug "Don't check if ${FILE} is an BICEP file because VALIDATE_BICEP is: ${VALIDATE_BICEP}"
+    return 1
+  fi
+
+  debug "Checking if ${FILE} is an BICEP file..."
+
+  if [[ "${FILE_EXTENSION}" == "bicep" ]]; then
+  debug "$FILE is a valid bicep template (has a valid extension: ${FILE_EXTENSION})"
+    return 0
+  else
+    return 1
+  fi
+}
+
 DetectCloudFormationFile() {
   FILE="${1}"
 
@@ -264,6 +284,7 @@ function IsNotSymbolicLink() {
 export -f CheckFileType
 export -f DetectActions
 export -f DetectARMFile
+export -f DetectBicepFile
 export -f DetectAWSStatesFIle
 export -f DetectCloudFormationFile
 export -f DetectKubernetesFile

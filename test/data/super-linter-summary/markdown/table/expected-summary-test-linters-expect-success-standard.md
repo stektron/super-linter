@@ -8,6 +8,7 @@
 | ARM                          | Pass ✅           |
 | BASH                         | Pass ✅           |
 | BASH_EXEC                    | Pass ✅           |
+| BICEP                        | Pass ✅           |
 | CHECKOV                      | Pass ✅           |
 | CLANG_FORMAT                 | Pass ✅           |
 | CLOUDFORMATION               | Pass ✅           |

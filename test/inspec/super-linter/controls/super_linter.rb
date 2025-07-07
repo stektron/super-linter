@@ -148,6 +148,7 @@ control "super-linter-installed-commands" do
     { linter_name: "arm-ttk", version_command: "grep -iE 'version' '/usr/bin/arm-ttk' | xargs" },
     { linter_name: "asl-validator" },
     { linter_name: "bash-exec", expected_exit_status: 1 }, # expect a return code = 1 because this linter doesn't support a "get linter version" command
+    { linter_name: "bicep" },
     { linter_name: "black" },
     { linter_name: "cfn-lint" },
     { linter_name: "checkov" },
@@ -480,6 +481,7 @@ control "super-linter-validate-files" do
     "/action/lib/.automation/actionlint.yml",
     "/action/lib/.automation/.ansible-lint.yml",
     "/action/lib/.automation/.arm-ttk.psd1",
+    "/action/lib/.automation/.bicep.psd1",
     "/action/lib/.automation/.cfnlintrc.yml",
     "/action/lib/.automation/.checkov.yaml",
     "/action/lib/.automation/.chktexrc",

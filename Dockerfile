@@ -528,6 +528,7 @@ FROM base_image AS standard
 ARG TARGETARCH
 
 ENV ARM_TTK_PSD1="/usr/lib/microsoft/arm-ttk/arm-ttk.psd1"
+ENV BICEP_PSD1="/usr/lib/microsoft/bicep/bicep.psd1"
 ENV PATH="${PATH}:/var/cache/dotnet/tools:/usr/share/dotnet"
 
 # Install Rust linters
@@ -563,6 +564,12 @@ RUN PS_INSTALL_FOLDER="$(cat /tmp/PS_INSTALL_FOLDER)" \
 #############################################################
 COPY scripts/install-arm-ttk.sh /
 RUN --mount=type=secret,id=GITHUB_TOKEN /install-arm-ttk.sh && rm -rf /install-arm-ttk.sh
+
+#############################################################
+# Install Azure Bicep CLI #
+#############################################################
+COPY scripts/install-bicep-cli.sh /
+RUN --mount=type=secret,id=GITHUB_TOKEN /install-bicep-cli.sh && rm -rf /install-bicep-cli.sh
 
 # Run to build version file and validate image again because we installed more linters
 ENV IMAGE="standard"

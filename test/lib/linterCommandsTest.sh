@@ -47,6 +47,11 @@ if [[ ! -v ARM_TTK_PSD1 ]]; then
   ARM_TTK_PSD1="/usr/lib/microsoft/arm-ttk/arm-ttk.psd1"
 fi
 
+# The slim image might not have this variable defined
+if [[ ! -v BICEP_PSD1 ]]; then
+  BICEP_PSD1="/usr/lib/microsoft/bicep/bicep.psd1"
+fi
+
 # Source the file so we can load commands to compare them without redefining
 # each command. We're not interested in the actual values of those commands, but
 # only in how we eventually modify them.

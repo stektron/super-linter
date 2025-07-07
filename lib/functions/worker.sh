@@ -101,6 +101,7 @@ function LintCodebase() {
   if [[ "${FILE_TYPE}" == "ANSIBLE" ]] ||
     [[ "${FILE_TYPE}" == "ARM" ]] ||
     [[ "${FILE_TYPE}" == "BASH_EXEC" ]] ||
+    [[ "${FILE_TYPE}" == "BICEP" ]] ||
     [[ "${FILE_TYPE}" == "CLOJURE" ]] ||
     [[ "${FILE_TYPE}" == "CSHARP" ]] ||
     [[ "${FILE_TYPE}" == "DOTNET_SLN_FORMAT_ANALYZERS" ]] ||
