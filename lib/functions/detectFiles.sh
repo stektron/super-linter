@@ -284,8 +284,8 @@ function IsNotSymbolicLink() {
 export -f CheckFileType
 export -f DetectActions
 export -f DetectARMFile
-export -f DetectBicepFile
 export -f DetectAWSStatesFIle
+export -f DetectBicepFile
 export -f DetectCloudFormationFile
 export -f DetectKubernetesFile
 export -f DetectOpenAPIFile
