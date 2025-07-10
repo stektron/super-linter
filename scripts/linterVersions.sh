@@ -130,7 +130,7 @@ for LANGUAGE in "${!LINTER_NAMES_ARRAY[@]}"; do
     GET_VERSION_CMD="$("${LINTER}" --version | grep -v 'available' | awk '{ print $2 }')"
   elif [[ ${LINTER} == "arm-ttk" ]]; then
     GET_VERSION_CMD="$(grep -iE 'version' "/usr/bin/arm-ttk" | xargs 2>&1 | awk '{ print $3 }')"
-  elif [[ ${LINTER} == "bicep" ]]; then
+  elif [[ "${LINTER}" == "bicep" ]]; then
     GET_VERSION_CMD="$("${LINTER}" --version | awk '{ print $4 }')"
   elif [[ "${LINTER}" == "black" ]]; then
     GET_VERSION_CMD="$("${LINTER}" --version | grep 'black' | awk '{ print $2 }')"
