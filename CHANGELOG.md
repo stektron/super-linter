@@ -1802,7 +1802,7 @@
   ([#5424](https://github.com/super-linter/super-linter/issues/5424))
   ([0ae4572](https://github.com/super-linter/super-linter/commit/0ae457287495a435b3128c364e44ece8b145c47a))
 - add support for astral-sh/ruff
-  (https://github.com/super-linter/super-linter/pull/5456), closes
+  (<https://github.com/super-linter/super-linter/pull/5456>), closes
   [#5384](https://github.com/super-linter/super-linter/issues/5384)
   ([e71a37d](https://github.com/super-linter/super-linter/commit/e71a37d49d588b33a0d6e10f364a682e7704460e))
 - support GoReleaser

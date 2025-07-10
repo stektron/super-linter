@@ -12,4 +12,4 @@ We're all done **here**.
 
 - [Link Action]<https://github.com>
 
-[ Link Action ](https://github.com)
+[Link Action](https://github.com)
