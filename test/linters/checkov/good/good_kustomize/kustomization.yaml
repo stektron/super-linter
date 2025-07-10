@@ -12,4 +12,3 @@ namespace: non-default-namespace
 
 resources:
   - graph_check.yaml
-...

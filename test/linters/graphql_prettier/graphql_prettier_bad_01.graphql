@@ -1,3 +1,5 @@
-type Project {name: String
+type Project {
+  name: String
   tagline: String
-  contributors: [User]}
+  contributors: [User]
+}

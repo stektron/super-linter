@@ -1,10 +1,10 @@
 enum Test {
-    Hoo = 'hoo'
+  Hoo = "hoo",
 }
 
 const spiderman = (person: String) => {
-    return 'Hello, ' + person;
-}
+  return "Hello, " + person;
+};
 
 let user = 1;
 console.log(spiderman(user));

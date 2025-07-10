@@ -8,30 +8,30 @@ spec:
     matchLabels:
       app: test
   policyTypes:
-  - Ingress
-  - Egress
+    - Ingress
+    - Egress
   ingress:
-  - from:
-    - ipBlock:
-        cidr: 172.17.0.0/16
-        except:
-        - 172.17.1.0/24
-    - namespaceSelector:
-        matchLabels:
-          project: myproject
-    - podSelector:
-        matchLabels:
-          role: frontend
-    ports:
-    - protocol: TCP
-      port: 6379
+    - from:
+        - ipBlock:
+            cidr: 172.17.0.0/16
+            except:
+              - 172.17.1.0/24
+        - namespaceSelector:
+            matchLabels:
+              project: myproject
+        - podSelector:
+            matchLabels:
+              role: frontend
+      ports:
+        - protocol: TCP
+          port: 6379
   egress:
-  - to:
-    - ipBlock:
-        cidr: 10.0.0.0/24
-    ports:
-    - protocol: TCP
-      port: 5978
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.0/24
+      ports:
+        - protocol: TCP
+          port: 5978
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -39,7 +39,7 @@ metadata:
   name: test-deployment
   namespace: test
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: { { .Values.replicaCount } }
   selector:
     matchLabels:
       app: test
@@ -48,19 +48,17 @@ spec:
       labels:
         app: test
     spec:
-      serviceAccountName: {{ .Values.serviceAccount.name }}
-      automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
-      securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      serviceAccountName: { { .Values.serviceAccount.name } }
+      automountServiceAccountToken: { { .Values.serviceAccount.automount } }
+      securityContext: { { - toYaml .Values.podSecurityContext | nindent 8 } }
       containers:
-        - name: {{ .Chart.Name }}
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+        - name: { { .Chart.Name } }
+          securityContext: { { - toYaml .Values.securityContext | nindent 12 } }
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}@{{ .Values.image.digest }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          imagePullPolicy: { { .Values.image.pullPolicy } }
           ports:
             - name: http
-              containerPort: {{ .Values.service.port }}
+              containerPort: { { .Values.service.port } }
               protocol: TCP
           livenessProbe:
             httpGet:
@@ -70,5 +68,4 @@ spec:
             httpGet:
               path: /
               port: http
-          resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+          resources: { { - toYaml .Values.resources | nindent 12 } }

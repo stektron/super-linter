@@ -4,4 +4,3 @@ kind: Kustomization
 
 resources:
   - graph_check.yaml
-...
