@@ -44,7 +44,7 @@ download_url="https://github.com/Azure/bicep/releases/latest/download/bicep-linu
 info "Downloading Bicep CLI for linux/${bicep_arch} from: ${download_url}"
 curl -sSL -o ./bicep "${download_url}"
 
-info "Setting execute permissions for the Bicep binary..."
+info "Setting execute permission for the Bicep binary..."
 chmod +x ./bicep
 
 info "Moving Bicep CLI to ${EXECUTABLE_PATH}..."
