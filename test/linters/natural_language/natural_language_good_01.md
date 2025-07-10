@@ -1,2 +1,1 @@
-My **JavaScript** is good
-Write changelogs about source maps
+My **JavaScript** is good Write changelogs about source maps

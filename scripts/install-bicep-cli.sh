@@ -28,15 +28,15 @@ arch=$(uname -m)
 info "Detected architecture: ${arch}"
 
 case "${arch}" in
-  x86_64)
-    bicep_arch="x64"
-    ;;
-  aarch64 | arm64)
-    bicep_arch="arm64"
-    ;;
-  *)
-    error "Unsupported architecture: ${arch}. Only x86_64 and arm64 are supported."
-    ;;
+x86_64)
+  bicep_arch="x64"
+  ;;
+aarch64 | arm64)
+  bicep_arch="arm64"
+  ;;
+*)
+  error "Unsupported architecture: ${arch}. Only x86_64 and arm64 are supported."
+  ;;
 esac
 
 download_url="https://github.com/Azure/bicep/releases/latest/download/bicep-linux-${bicep_arch}"

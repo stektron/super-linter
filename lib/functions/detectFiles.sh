@@ -69,7 +69,7 @@ DetectBicepFile() {
   debug "Checking if ${FILE} is an BICEP file..."
 
   if [[ "${FILE_EXTENSION}" == "bicep" ]]; then
-  debug "$FILE is a valid bicep template (has a valid extension: ${FILE_EXTENSION})"
+    debug "$FILE is a valid bicep template (has a valid extension: ${FILE_EXTENSION})"
     return 0
   else
     return 1

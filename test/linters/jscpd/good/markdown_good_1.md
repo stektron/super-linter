@@ -6,7 +6,7 @@ This is just standard good markdown.
 
 This header follows the step down from `level 1`.
 
-- Here it *is*
+- Here it _is_
   - Some more **indention**
     - why so much?
 

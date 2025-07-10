@@ -9,6 +9,7 @@ ARM_FILE_NAME=".arm-ttk.psd1"
 BASH_FILE_NAME="${BASH_FILE_NAME:-".shellcheckrc"}"
 BASH_SEVERITY="${BASH_SEVERITY:-""}"
 BICEP_FILE_NAME=".bicep.psd1"
+# shellcheck disable=SC2034  # Variable is referenced indirectly
 CHECKOV_FILE_NAME="${CHECKOV_FILE_NAME:-".checkov.yaml"}"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
 CLANG_FORMAT_FILE_NAME="${CLANG_FORMAT_FILE_NAME:-".clang-format"}"

@@ -59,7 +59,7 @@ Super-linter supports the following tools:
 | **Amazon States Language**        | [ASL Validator](https://github.com/ChristopheBougere/asl-validator)                                                                                                                                                       | See JSON formatters                                                                                                |
 | **AWS CloudFormation templates**  | [AWS CloudFormation Linter (cfn-lint)](https://github.com/aws-cloudformation/cfn-lint), [Checkov](https://www.checkov.io/)                                                                                                | See YAML formatters                                                                                                |
 | **Azure Resource Manager (ARM)**  | [Azure Resource Manager Template Toolkit (arm-ttk)](https://github.com/azure/arm-ttk), [Checkov](https://www.checkov.io/)                                                                                                 | See JSON formatters                                                                                                |
-| **Azure Bicep**  | [Azure Bicep Linter](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/linter), [Checkov](https://www.checkov.io/)                                                                                                 | See JSON formatters                                                                                                |
+| **Azure Bicep**                   | [Azure Bicep Linter](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/linter), [Checkov](https://www.checkov.io/)                                                                                     | See JSON formatters                                                                                                |
 | **C**, **C++**                    | [cpp-lint](https://github.com/cpplint/cpplint)                                                                                                                                                                            | [clang-format](https://clang.llvm.org/docs/ClangFormatStyleOptions.html)                                           |
 | **C#**                            | See Dotnet solutions                                                                                                                                                                                                      | [dotnet format whitespace command](https://github.com/dotnet/format)                                               |
 | **CSS**, **SCSS**, **Sass**       | [stylelint](https://stylelint.io/)                                                                                                                                                                                        | [Prettier](https://prettier.io/)                                                                                   |
@@ -191,7 +191,6 @@ Super-Linter provides several variants:
   linters.
 - `slim`: `super-linter/super-linter/slim@[VERSION]`: includes all supported
   linters except:
-
   - Rustfmt
   - Rust Clippy
   - Azure Resource Manager Template Toolkit (arm-ttk)
@@ -470,7 +469,6 @@ Super-linter supports the following locations to deliver fixes:
 
 - In the current Super-linter workspace, so you can process the changes to your
   files by yourself. For example:
-
   - If you're running Super-linter in your CI environment, such as GitHub
     Actions, you can commit and push changes as part of your workflow.
   - If you're running Super-linter locally, you can commit the changes as you
