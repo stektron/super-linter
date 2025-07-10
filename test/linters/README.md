@@ -35,14 +35,14 @@ directory.
 
 ### OpenAPI test cases
 
-The `_bad_` tests are valid `.yml`/`.json` but invalid OpenAPI specs. The test
-extensions used are `.ymlopenapi`/`.jsonopenapi` instead of `.yml`/`.json`. This
-is to prevent the `YAML` and `JSON` tests from picking them up.
+The `_bad_` tests are valid `.yml`/`.json` but invalid OpenAPI specs.
+The test extensions used are `.ymlopenapi`/`.jsonopenapi` instead of
+`.yml`/`.json`. This is to prevent the `YAML` and `JSON` tests from picking them
+up.
 
 ### ARM test cases
 
-`apiVersions` older than 2 years (730 days) are treated as errors by the ARM
-linter if there is a newer version available.
+`apiVersions` older than 2 years (730 days) are treated as errors by the ARM linter if there is a newer version available.
 
 ### Ansible test cases
 
