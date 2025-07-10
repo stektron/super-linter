@@ -8,7 +8,10 @@
     "**/tests/**",
     "**/__fixtures__/**"
   ],
-  "ignoreDeps": ["go", "node-fetch"],
+  "ignoreDeps": [
+    "go",
+    "node-fetch"
+  ],
   "constraints": {
     "go": "1.20"
   }

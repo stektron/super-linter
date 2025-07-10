@@ -1,15 +1,18 @@
 {
-  ignooooooooorePaths: [
+  "ignooooooooorePaths": [
     "**/node_modules/**",
     "**/bower_components/**",
     "**/vendor/**",
     "**/examples/**",
     "**/__tests__/**",
     "**/tests/**",
-    "**/__fixtures__/**",
+    "**/__fixtures__/**"
   ],
-  iggggggggnoreDeps: ["go", "node-fetch"],
-  constraaaaaaaaaints: {
-    go: "1.20",
-  },
+  "iggggggggnoreDeps": [
+    "go",
+    "node-fetch"
+  ],
+  "constraaaaaaaaaints": {
+    "go": "1.20"
+  }
 }

@@ -17,12 +17,6 @@
   top: calc(calc(1em * 2) / 3);
 }
 
-.selector-x {
-  width: 10%;
-}
-.selector-y {
-  width: 20%;
-}
-.selector-z {
-  width: 30%;
-}
+.selector-x { width: 10%; }
+.selector-y { width: 20%; }
+.selector-z { width: 30%; }

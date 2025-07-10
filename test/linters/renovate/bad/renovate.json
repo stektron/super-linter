@@ -8,7 +8,10 @@
     "**/tests/**",
     "**/__fixtures__/**"
   ],
-  "iggggggggnoreDeps": ["go", "node-fetch"],
+  "iggggggggnoreDeps": [
+    "go",
+    "node-fetch"
+  ],
   "constraaaaaaaaaints": {
     "go": "1.20"
   }

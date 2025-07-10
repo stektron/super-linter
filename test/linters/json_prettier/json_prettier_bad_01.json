@@ -1,6 +1,8 @@
 {
   "arrow_spacing": {
-    "level": ["ignore"]
+    "level": [
+      "ignore"
+    ]
   },
   "foo": "bar",
   "braces_spacing": {

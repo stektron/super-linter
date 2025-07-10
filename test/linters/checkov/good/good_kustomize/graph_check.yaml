@@ -41,6 +41,7 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
+...
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -54,5 +55,6 @@ spec:
     - Ingress
   ingress:
     - from:
-        - ipBlock:
-            cidr: 172.17.0.0/16
+      - ipBlock:
+          cidr: 172.17.0.0/16
+...
