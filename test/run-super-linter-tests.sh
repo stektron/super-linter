@@ -357,7 +357,7 @@ set -o errexit
 
 # Remove leftovers after runnint tests because we don't want other tests
 # to consider them
-RemoveTestLeftovers
+# RemoveTestLeftovers
 
 debug "Super-linter workspace: ${SUPER_LINTER_WORKSPACE}"
 debug "Super-linter exit code: ${SUPER_LINTER_EXIT_CODE}"
