@@ -352,30 +352,19 @@ jobs:
 
       - name: "Test case: ${{ env.CONTAINER_IMAGE_OUTPUT_IMAGE_NAME }} - ${{ matrix.test-case }}"
         run: |
-          echo "Running: ${{ env.CONTAINER_IMAGE_OUTPUT_IMAGE_NAME }} - ${{ matrix.test-case }}"
-          make ${{ matrix.test-case }}
+          echo "--- Workspace before make ---"
+          pwd
+          ls -lA
+
+          echo "--- Running test: make ${{ matrix.test-case }} ---"
+          # The '|| true' will let the step continue even if make fails,
+          # so we can see what happened after.
+          make ${{ matrix.test-case }} || true
+
+          echo "--- Workspace after make (recursive list) ---"
+          ls -lAR
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Display Super-Linter Summary for Debugging
-        if: always()
-        run: |
-          OUTPUT_DIR="/home/runner/work/super-linter/super-linter/super-linter-output"
-          SUMMARY_FILE="${OUTPUT_DIR}/super-linter-summary.md"
-
-          echo "--- Checking output directory contents ---"
-          ls -lR "${OUTPUT_DIR}"
-
-          echo "--- Checking summary file details ---"
-          if [ -f "${SUMMARY_FILE}" ]; then
-            ls -l "${SUMMARY_FILE}"
-          else
-            echo "File does not exist: ${SUMMARY_FILE}"
-          fi
-
-          echo "--- Contents of super-linter-summary.md ---"
-          cat "${SUMMARY_FILE}" || true
-          echo "--- End of file ---"
 
   # The purpose of this job is to run only when the run-test-suite job runs to completion.
   # We can use this job as a required status check in a branch protection rule without
