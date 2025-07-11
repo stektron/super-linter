@@ -357,6 +357,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Display Super-Linter Summary for Debugging
+        if: always()
+        run: |
+          echo "--- Contents of super-linter-summary.md ---"
+          cat /home/runner/work/super-linter/super-linter/super-linter-output/super-linter-summary.md || true
+          echo "--- End of file ---"
+
   # The purpose of this job is to run only when the run-test-suite job runs to completion.
   # We can use this job as a required status check in a branch protection rule without
   # having to select each individual job that dynamically add to the test matrix.
