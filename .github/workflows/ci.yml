@@ -360,8 +360,21 @@ jobs:
       - name: Display Super-Linter Summary for Debugging
         if: always()
         run: |
+          OUTPUT_DIR="/home/runner/work/super-linter/super-linter/super-linter-output"
+          SUMMARY_FILE="${OUTPUT_DIR}/super-linter-summary.md"
+
+          echo "--- Checking output directory contents ---"
+          ls -lR "${OUTPUT_DIR}"
+
+          echo "--- Checking summary file details ---"
+          if [ -f "${SUMMARY_FILE}" ]; then
+            ls -l "${SUMMARY_FILE}"
+          else
+            echo "File does not exist: ${SUMMARY_FILE}"
+          fi
+
           echo "--- Contents of super-linter-summary.md ---"
-          cat /home/runner/work/super-linter/super-linter/super-linter-output/super-linter-summary.md || true
+          cat "${SUMMARY_FILE}" || true
           echo "--- End of file ---"
 
   # The purpose of this job is to run only when the run-test-suite job runs to completion.
