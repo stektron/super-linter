@@ -220,6 +220,7 @@ control "super-linter-installed-commands" do
   # Removed linters from slim image
   SLIM_IMAGE_REMOVED_LINTERS = %w(
     arm-ttk
+    bicep
     clippy
     dotnet
     pwsh

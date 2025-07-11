@@ -1,7 +1,6 @@
 # Documentation:
 # - Bicep Linter https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/linter
 # - Bicep transpiles to ARM templates
-
 @{
     # Test = @(
     #     'adminusername-should-not-be-literal',
