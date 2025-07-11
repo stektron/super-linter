@@ -354,8 +354,11 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: actual-summary-file
+          # Make artifact name unique to the test case
+          name: actual-summary-${{ matrix.test-case }}
           path: /home/runner/work/super-linter/super-linter/super-linter-output/super-linter-summary.md
+          # Add this line to ignore tests that don't create the file
+          if-no-files-found: ignore
 
       - name: "Test case: ${{ env.CONTAINER_IMAGE_OUTPUT_IMAGE_NAME }} - ${{ matrix.test-case }}"
         run: |
