@@ -8,6 +8,7 @@
 | ARM                          | Fail ❌           |
 | BASH                         | Fail ❌           |
 | BASH_EXEC                    | Fail ❌           |
+| BICEP                        | Fail ❌           |
 | CHECKOV                      | Fail ❌           |
 | CLANG_FORMAT                 | Fail ❌           |
 | CLOUDFORMATION               | Fail ❌           |
