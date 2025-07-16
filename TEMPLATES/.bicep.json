@@ -34,10 +34,10 @@
         "nested-deployment-template-scoping": {
           "level": "error"
         },
-        "no-conflicting-metadata" : {
+        "no-conflicting-metadata": {
           "level": "warning"
         },
-        "no-deployments-resources" : {
+        "no-deployments-resources": {
           "level": "warning"
         },
         "no-hardcoded-env-urls": {
