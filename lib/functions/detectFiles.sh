@@ -60,7 +60,7 @@ DetectBicepFile() {
   FILE="${1}"
 
   FILE_EXTENSION="$(GetFileExtension "$FILE")"
-  debug "File:[${FILE}], File extension:[${FILE_EXTENSION}]"
+  debug "File: [${FILE}], File extension:[${FILE_EXTENSION}]"
 
   if [ "${VALIDATE_BICEP}" == "false" ]; then
     debug "Don't check if ${FILE} is a BICEP file because VALIDATE_BICEP is: ${VALIDATE_BICEP}"

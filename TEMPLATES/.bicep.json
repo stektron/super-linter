@@ -1,12 +1,8 @@
 {
-  "$schema": "https://schema.management.azure.com/schemas/2020-01-01/bicepconfig.schema.json",
   "analyzers": {
     "core": {
-      "rules": {
-        "no-unused-params": {
-          "level": "off"
-        }
-      }
+      "verbose": false,
+      "rules": {}
     }
   }
 }
