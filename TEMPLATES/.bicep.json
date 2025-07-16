@@ -2,8 +2,7 @@
   "analyzers": {
     "core": {
       "verbose": false,
-      "rules": {
-      }
+      "rules": {}
     }
   }
 }
