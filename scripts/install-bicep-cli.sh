@@ -24,24 +24,9 @@ error() {
 
 info "Starting Bicep CLI installation..."
 
-arch=$(uname -m)
-info "Detected architecture: ${arch}"
+download_url="https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64"
 
-case "${arch}" in
-x86_64)
-  bicep_arch="x64"
-  ;;
-aarch64 | arm64)
-  bicep_arch="arm64"
-  ;;
-*)
-  error "Unsupported architecture: ${arch}. Only x86_64 and arm64 are supported."
-  ;;
-esac
-
-download_url="https://github.com/Azure/bicep/releases/latest/download/bicep-linux-${bicep_arch}"
-
-info "Downloading Bicep CLI for linux/${bicep_arch} from: ${download_url}"
+info "Downloading Bicep CLI for linux/x64 from: ${download_url}"
 curl -sSL -o ./bicep "${download_url}"
 
 info "Setting execute permission for the Bicep binary..."
