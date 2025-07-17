@@ -578,9 +578,6 @@ RUN --mount=type=secret,id=GITHUB_TOKEN /install-arm-ttk.sh && rm -rf /install-a
 #############################################################
 COPY scripts/install-bicep-cli.sh /
 RUN --mount=type=secret,id=GITHUB_TOKEN /install-bicep-cli.sh && rm -rf /install-bicep-cli.sh
-# Workaround for stack overflow issues in containerized .NET/Bicep
-ENV DOTNET_THREAD_STACK_SIZE="8388608"
-
 
 # Run to build version file and validate image again because we installed more linters
 ENV IMAGE="standard"
