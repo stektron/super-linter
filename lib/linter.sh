@@ -153,6 +153,10 @@ declare GROOVY_FAILON_LEVEL
 GROOVY_FAILON_LEVEL="${GROOVY_FAILON_LEVEL:-"warning"}"
 export GROOVY_FAILON_LEVEL
 
+declare GROOVY_LOG_LEVEL
+GROOVY_LOG_LEVEL="${GROOVY_LOG_LEVEL:-"info"}"
+export GROOVY_LOG_LEVEL
+
 declare -l FAIL_ON_CONFLICTING_TOOLS_ENABLED
 FAIL_ON_CONFLICTING_TOOLS_ENABLED="${FAIL_ON_CONFLICTING_TOOLS_ENABLED:-"false"}"
 export FAIL_ON_CONFLICTING_TOOLS_ENABLED
@@ -581,7 +585,7 @@ UpdateLoopsForImage() {
   fi
 }
 
-# shellcheck disable=SC2317
+# shellcheck disable=SC2317,SC2329 # Shellcheck doesn't correctly detect usage in trap
 cleanup() {
   local -ri EXIT_CODE=$?
   debug "Captured exit code: ${EXIT_CODE}"
