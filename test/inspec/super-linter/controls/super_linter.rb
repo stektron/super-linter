@@ -212,6 +212,7 @@ control "super-linter-installed-commands" do
     { linter_name: "terrascan", version_option: "version" },
     { linter_name: "textlint" },
     { linter_name: "tflint" },
+    { linter_name: "trivy" },
     { linter_name: "xmllint" },
     { linter_name: "yamllint" },
   ]
@@ -470,12 +471,14 @@ control "super-linter-validate-files" do
     "/action/lib/functions/log.sh",
     "/action/lib/functions/output.sh",
     "/action/lib/functions/possum.sh",
+    "/action/lib/functions/runtimeDependencies.sh",
     "/action/lib/functions/updateSSL.sh",
     "/action/lib/functions/validation.sh",
     "/action/lib/functions/worker.sh",
     "/action/lib/globals/languages.sh",
     "/action/lib/globals/linterCommandsOptions.sh",
     "/action/lib/globals/linterRules.sh",
+    "/action/lib/globals/runtimeDependencies.sh",
     "/action/lib/.automation/actionlint.yml",
     "/action/lib/.automation/.ansible-lint.yml",
     "/action/lib/.automation/.arm-ttk.psd1",
@@ -517,10 +520,12 @@ control "super-linter-validate-files" do
     "/action/lib/.automation/phpcs.xml",
     "/action/lib/.automation/phpstan.neon",
     "/action/lib/.automation/psalm.xml",
+    "/action/lib/.automation/trivy.yaml",
     "/usr/bin/bash-exec",
     "/usr/bin/git-merge-conflict-markers",
     "/usr/bin/helm", # needed for checkov's helm framework
     "/usr/bin/kustomize", # needed for checkov's kustomize checks
+    "/usr/bin/trivy",
   ]
 
   files.each do |item|
