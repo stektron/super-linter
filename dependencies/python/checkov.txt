@@ -1,5 +1,1 @@
-<<<<<<< HEAD
 checkov==3.2.460
-=======
-checkov==3.2.451
->>>>>>> e7182fa4 (deps(python): bump the pip group across 1 directory with 4 updates (#6879))
