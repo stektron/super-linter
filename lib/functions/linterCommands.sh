@@ -119,7 +119,8 @@ if [ "${BASH_EXEC_IGNORE_LIBRARIES}" == 'true' ]; then
   debug "Enabling bash-exec option to ignore shell library files."
   LINTER_COMMANDS_ARRAY_BASH_EXEC+=('true')
 fi
-LINTER_COMMANDS_ARRAY_BICEP=(bash -c 'DOTNET_THREAD_STACK_SIZE=8388608 bicep lint "$1"' -- '{/}')
+# shellcheck disable=SC2016
+LINTER_COMMANDS_ARRAY_BICEP=(bash -c 'cd "$(dirname "$1")" && DOTNET_THREAD_STACK_SIZE=8388608 bicep lint "$(basename "$1")"' --)
 LINTER_COMMANDS_ARRAY_CHECKOV=(checkov --config-file "${CHECKOV_LINTER_RULES}")
 if CheckovConfigurationFileContainsDirectoryOption "${CHECKOV_LINTER_RULES}"; then
   # Consume the input as we do with ANSIBLE

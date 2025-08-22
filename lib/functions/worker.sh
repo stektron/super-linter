@@ -134,8 +134,7 @@ function LintCodebase() {
   # - {/} basename of the input lint
   # - {//} dirname of input line
 
-  if [[ ${FILE_TYPE} == "BICEP" ]] ||
-    [[ ${FILE_TYPE} == "CSHARP" ]] ||
+  if [[ ${FILE_TYPE} == "CSHARP" ]] ||
     [[ (${FILE_TYPE} == "R" && -f "$(dirname "${FILE}")/.lintr") ]] ||
     [[ ${FILE_TYPE} == "KOTLIN" ]] ||
     [[ ${FILE_TYPE} == "RUST_CLIPPY" ]] ||
