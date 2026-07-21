@@ -23,6 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         stages:
+          - stage-name: python-base
           - stage-name: base_image
           - stage-name: clang-format
           - stage-name: python-builder
@@ -37,10 +38,12 @@ jobs:
       CONTAINER_IMAGE_ID: "ghcr.io/super-linter/super-linter:latest"
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Free Disk space
         shell: bash
@@ -51,14 +54,14 @@ jobs:
           sudo rm -rf /usr/local/.ghcup || true
 
       - name: Login to GHCR
-        uses: docker/login-action@v3.5.0
+        uses: docker/login-action@v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build clang-format stage
-        uses: docker/build-push-action@v6
+      - name: Build ${{ matrix.stages.stage-name }} stage
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -70,7 +73,7 @@ jobs:
             GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
           target: ${{ matrix.stages.stage-name }}
       - name: Create Issue on Failure
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         if: failure()
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
@@ -107,14 +110,14 @@ jobs:
             target: standard
     timeout-minutes: 120
     env:
-      CONTAINER_IMAGE_ID: "ghcr.io/super-linter/super-linter:${{ matrix.images.prefix }}latest"
       CONTAINER_IMAGE_TARGET: "${{ matrix.images.target }}"
       STAGES_BUILD_CACHE_CONTAINER_IMAGE_ID: "ghcr.io/super-linter/super-linter:latest"
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set build metadata
         run: |
@@ -148,7 +151,12 @@ jobs:
           echo "Build revision (GH Actions workflow): ${BUILD_REVISION}"
           echo "Build version (GH Actions workflow): ${BUILD_VERSION}"
 
+          # Initialize CONTAINER_IMAGE_ID here and not in the job env directive
+          # because the build-metadata.sh script should not see it, so that it
+          # doesn't try fetching build metadata from a non-existing image whose
+          # tag is stored in CONTAINER_IMAGE_ID.
           {
+            echo "CONTAINER_IMAGE_ID=ghcr.io/super-linter/super-linter:${{ matrix.images.prefix }}latest"
             echo "BUILD_DATE=${BUILD_DATE}"
             echo "BUILD_REVISION=${BUILD_REVISION}"
             echo "BUILD_VERSION=${BUILD_VERSION}"
@@ -163,10 +171,10 @@ jobs:
           sudo rm -rf /usr/local/.ghcup || true
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build Image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -199,14 +207,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login to GHCR
-        uses: docker/login-action@v3.5.0
+        uses: docker/login-action@v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and Push Image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -235,7 +243,7 @@ jobs:
           target: "${{ matrix.images.target }}"
 
       - name: Create Issue on Failure
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         if: failure()
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
@@ -265,7 +273,7 @@ jobs:
       pull-requests: write
     timeout-minutes: 120
     steps:
-      - uses: googleapis/release-please-action@v4.2.0
+      - uses: googleapis/release-please-action@v5.0.0
         id: release
         with:
           config-file: .github/release-please/release-please-config.json
@@ -276,7 +284,7 @@ jobs:
         if: steps.release.outputs.release_created
         # shellcheck disable=SC2062
         run: |
-          RELEASE_VERSION="${{ steps.release.outputs.tag_name }}"
+          RELEASE_VERSION="${STEPS_RELEASE_OUTPUTS_TAG_NAME}"
 
           if [ -z "${RELEASE_VERSION}" ]; then
             echo "Error RELEASE_VERSION is empty. Exiting..."
@@ -288,16 +296,19 @@ jobs:
             exit 2
           fi
 
-          SEMVER_MAJOR_VERSION=v${{ steps.release.outputs.major }}
+          SEMVER_MAJOR_VERSION=v${STEPS_RELEASE_OUTPUTS_MAJOR}
 
           {
             echo "RELEASE_VERSION=${RELEASE_VERSION}"
             echo "SEMVER_MAJOR_VERSION=${SEMVER_MAJOR_VERSION}"
           } >> "${GITHUB_ENV}"
+        env:
+          STEPS_RELEASE_OUTPUTS_TAG_NAME: ${{ steps.release.outputs.tag_name }}
+          STEPS_RELEASE_OUTPUTS_MAJOR: ${{ steps.release.outputs.major }}
 
       - name: Login to GHCR
         if: steps.release.outputs.release_created
-        uses: docker/login-action@v3.5.0
+        uses: docker/login-action@v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -307,7 +318,7 @@ jobs:
       # Instead, we pull the latest image and tag it.
       - name: Retag and Push Images
         if: steps.release.outputs.release_created
-        uses: akhilerm/tag-push-action@v2.2.0
+        uses: akhilerm/tag-push-action@v2.3.0
         with:
           src: ghcr.io/super-linter/super-linter:latest
           dst: |
@@ -316,16 +327,18 @@ jobs:
 
       - name: Retag and Push Images slim
         if: steps.release.outputs.release_created
-        uses: akhilerm/tag-push-action@v2.2.0
+        uses: akhilerm/tag-push-action@v2.3.0
         with:
           src: ghcr.io/super-linter/super-linter:slim-latest
           dst: |
             ghcr.io/super-linter/super-linter:slim-${{ env.SEMVER_MAJOR_VERSION }}
             ghcr.io/super-linter/super-linter:slim-${{ env.RELEASE_VERSION }}
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # Persist credentials because we update Git tags
+          persist-credentials: true
 
       # No need to tag major.minor.patch because that tag is automatically created when creating the release
       - name: Tag major, minor, and latest versions
@@ -334,14 +347,14 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
 
-          git tag --annotate --force ${{ env.SEMVER_MAJOR_VERSION }} -m "Release ${{ env.SEMVER_MAJOR_VERSION }}"
-          git tag --annotate --force latest -m "Release latest (${{ env.RELEASE_VERSION }})"
+          git tag --annotate --force "${SEMVER_MAJOR_VERSION}" -m "Release ${SEMVER_MAJOR_VERSION}"
+          git tag --annotate --force latest -m "Release latest (${RELEASE_VERSION})"
 
-          git push --force origin ${{ env.SEMVER_MAJOR_VERSION }}
+          git push --force origin "${SEMVER_MAJOR_VERSION}"
           git push --force origin latest
 
       - name: Create Issue on Failure
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         if: failure()
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
@@ -355,3 +368,12 @@ jobs:
                 "zkoppert", "Hanse00", "ferrarimarco"
               ]
             })
+
+  trigger-audit:
+    name: Trigger Dependency Audits
+    needs:
+      - test
+    uses: ./.github/workflows/audit.yaml
+    permissions:
+      contents: read
+      issues: write

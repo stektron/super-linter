@@ -1,21 +1,60 @@
 #!/usr/bin/env bash
 
-DetectActions() {
-  FILE="${1}"
+DetectGitHubActionsWorkflows() {
+  local FILE="${1}"
 
-  if [ "${VALIDATE_GITHUB_ACTIONS}" == "false" ]; then
-    debug "Don't check if ${FILE} is a GitHub Actions file because VALIDATE_GITHUB_ACTIONS is: ${VALIDATE_GITHUB_ACTIONS}"
+  if [[ "${VALIDATE_GITHUB_ACTIONS}" == "false" ]] &&
+    [[ "${VALIDATE_GITHUB_ACTIONS_ZIZMOR}" == "false" ]]; then
+    debug "Don't check if ${FILE} is a GitHub Actions file because VALIDATE_GITHUB_ACTIONS is ${VALIDATE_GITHUB_ACTIONS}, and VALIDATE_GITHUB_ACTIONS_ZIZMOR is ${VALIDATE_GITHUB_ACTIONS_ZIZMOR}"
     return 1
   fi
 
-  debug "Checking if ${FILE} is a GitHub Actions file..."
+  local FILE_DIR_NAME
+  local RET_CODE
+  FILE_DIR_NAME="$(dirname "${FILE}")"
+  RET_CODE=$?
+  if [[ "${RET_CODE}" -gt 0 ]]; then
+    fatal "Error while getting the directory name for ${FILE:-"not set"} when detecting GitHub Actions workflow files. Output: ${FILE_DIR_NAME:-"empty"}"
+  fi
 
   # Check if in the users .github, or the super linter test suite
-  if [[ "$(dirname "${FILE}")" == *".github/workflows"* ]] || [[ "$(dirname "${FILE}")" == *"${TEST_CASE_FOLDER}/github_actions"* ]]; then
+  if [[ "${FILE_DIR_NAME}" == *".github/workflows"* ]] ||
+    [[ "${FILE_DIR_NAME}" == *"${TEST_CASE_FOLDER}/github_actions"* ]]; then
     debug "${FILE} is GitHub Actions file."
     return 0
   else
-    debug "${FILE} is NOT GitHub Actions file."
+    return 1
+  fi
+}
+
+DetectDependabot() {
+  local FILE="${1}"
+
+  if [[ "${VALIDATE_GITHUB_ACTIONS_ZIZMOR}" == "false" ]]; then
+    debug "Don't check if ${FILE} is a Dependabot file because VALIDATE_GITHUB_ACTIONS_ZIZMOR is ${VALIDATE_GITHUB_ACTIONS_ZIZMOR}"
+    return 1
+  fi
+
+  if [[ "${FILE}" =~ (^|/)\.github/dependabot\.ya?ml$ ]]; then
+    debug "${FILE} is a Dependabot file."
+    return 0
+  else
+    return 1
+  fi
+}
+
+DetectGitHubActions() {
+  local FILE="${1}"
+
+  if [[ "${VALIDATE_GITHUB_ACTIONS_ZIZMOR}" == "false" ]]; then
+    debug "Don't check if ${FILE} is a GitHub Action file because VALIDATE_GITHUB_ACTIONS_ZIZMOR is ${VALIDATE_GITHUB_ACTIONS_ZIZMOR}"
+    return 1
+  fi
+
+  if [[ "${FILE}" =~ (^|/)action\.ya?ml$ ]]; then
+    debug "${FILE} is a GitHub Action file."
+    return 0
+  else
     return 1
   fi
 }
@@ -28,13 +67,10 @@ DetectOpenAPIFile() {
     return 1
   fi
 
-  debug "Checking if ${FILE} is an OpenAPI file..."
-
   if grep -E '"openapi":|"swagger":|^openapi:|^swagger:' "${FILE}" >/dev/null; then
     debug "${FILE} is an OpenAPI descriptor"
     return 0
   else
-    debug "${FILE} is NOT an OpenAPI descriptor"
     return 1
   fi
 }
@@ -47,9 +83,8 @@ DetectARMFile() {
     return 1
   fi
 
-  debug "Checking if ${FILE} is an ARM file..."
-
   if grep -E 'schema.management.azure.com' "${FILE}" >/dev/null; then
+    debug "${FILE} is an ARM file"
     return 0
   else
     return 1
@@ -64,37 +99,35 @@ DetectCloudFormationFile() {
     return 1
   fi
 
-  debug "Checking if ${FILE} is a Cloud Formation file..."
-
   # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/template-formats.html
   # AWSTemplateFormatVersion is optional
 
-  # Check if file has AWS Template info
-  if grep -q 'AWSTemplateFormatVersion' "${FILE}" >/dev/null; then
+  # Check if file has AWS Template info or AWS References
+  if grep -q 'AWSTemplateFormatVersion' "${FILE}" >/dev/null ||
+    grep -q -E '(AWS|Alexa|Custom)::' "${FILE}" >/dev/null; then
+    debug "Checking if ${FILE} is a Cloud Formation file..."
     return 0
+  else
+    return 1
   fi
-
-  # See if it contains AWS References
-  if grep -q -E '(AWS|Alexa|Custom)::' "${FILE}" >/dev/null; then
-    return 0
-  fi
-
-  return 1
 }
 
 DetectKubernetesFile() {
   FILE="${1}"
 
-  debug "Checking if ${FILE} is a Kubernetes descriptor..."
+  if [ "${VALIDATE_KUBERNETES_KUBECONFORM}" == "false" ]; then
+    debug "Don't check if ${FILE} is a Kubernetes file because VALIDATE_KUBERNETES_KUBECONFORM is: ${VALIDATE_KUBERNETES_KUBECONFORM}"
+    return 1
+  fi
+
   if grep -q -v 'kustomize.config.k8s.io' "${FILE}" &&
     grep -q -E '(^apiVersion):' "${FILE}" &&
     grep -q -E '(^kind):' "${FILE}"; then
     debug "${FILE} is a Kubernetes descriptor"
     return 0
+  else
+    return 1
   fi
-
-  debug "${FILE} is NOT a Kubernetes descriptor"
-  return 1
 }
 
 DetectAWSStatesFIle() {
@@ -105,56 +138,13 @@ DetectAWSStatesFIle() {
     return 1
   fi
 
-  debug "Checking if ${FILE} is a AWS states descriptor..."
-
   # https://states-language.net/spec.html#example
   if grep -q '"Resource": *"arn' "${FILE}" &&
     grep -q '"States"' "${FILE}"; then
+    debug "${FILE} is an AWS states descriptor"
     return 0
-  fi
-
-  return 1
-}
-
-function GetFileType() {
-  # Need to run the file through the 'file' exec to help determine
-  # The type of file being parsed
-
-  FILE="$1"
-  GET_FILE_TYPE_CMD=$(file "${FILE}" 2>&1)
-
-  echo "${GET_FILE_TYPE_CMD}"
-}
-
-function CheckFileType() {
-  # Need to run the file through the 'file' exec to help determine
-  # The type of file being parsed
-
-  local FILE
-  FILE="$1"
-
-  local GET_FILE_TYPE_CMD
-  GET_FILE_TYPE_CMD="$(GetFileType "$FILE")"
-
-  local FILE_TYPE_MESSAGE
-
-  if [[ ${GET_FILE_TYPE_CMD} == *"Ruby script"* ]]; then
-    FILE_TYPE_MESSAGE="Found Ruby script without extension (${FILE}). Rename the file with proper extension for Ruby files."
-    echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-RUBY"
-  elif [[ ${GET_FILE_TYPE_CMD} == *"Python script"* ]]; then
-    FILE_TYPE_MESSAGE="Found Python script without extension (${FILE}). Rename the file with proper extension for Python files."
-    echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON"
-  elif [[ ${GET_FILE_TYPE_CMD} == *"Perl script"* ]]; then
-    FILE_TYPE_MESSAGE="Found Perl script without extension (${FILE}). Rename the file with proper extension for Perl files."
-    echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PERL"
   else
-    FILE_TYPE_MESSAGE="Failed to get file type for: ${FILE}"
-  fi
-
-  if [ "${SUPPRESS_FILE_TYPE_WARN}" == "false" ]; then
-    warn "${FILE_TYPE_MESSAGE}"
-  else
-    debug "${FILE_TYPE_MESSAGE}"
+    return 1
   fi
 }
 
@@ -165,47 +155,6 @@ function GetFileExtension() {
   # Extract the file extension
   FILE_TYPE=${FILE##*.}
   echo "$FILE_TYPE"
-}
-
-function IsValidShellScript() {
-  FILE="$1"
-
-  if [ "${VALIDATE_BASH}" == "false" ] && [ "${VALIDATE_BASH_EXEC}" == "false" ] && [ "${VALIDATE_SHELL_SHFMT}" == "false" ]; then
-    debug "Don't check if ${FILE} is a shell script because VALIDATE_BASH, VALIDATE_BASH_EXEC, and VALIDATE_SHELL_SHFMT are set to: ${VALIDATE_BASH}, ${VALIDATE_BASH_EXEC}, ${VALIDATE_SHELL_SHFMT}"
-    return 1
-  fi
-
-  FILE_EXTENSION="$(GetFileExtension "$FILE")"
-  GET_FILE_TYPE_CMD="$(GetFileType "$FILE")"
-
-  debug "File:[${FILE}], File extension:[${FILE_EXTENSION}], File type: [${GET_FILE_TYPE_CMD}]"
-
-  if [[ "${FILE_EXTENSION}" == "zsh" ]] ||
-    [[ ${GET_FILE_TYPE_CMD} == *"zsh script"* ]]; then
-    warn "$FILE is a ZSH script. Skipping..."
-    return 1
-  fi
-
-  if [ "${FILE_EXTENSION}" == "sh" ] ||
-    [ "${FILE_EXTENSION}" == "bash" ] ||
-    [ "${FILE_EXTENSION}" == "bats" ] ||
-    [ "${FILE_EXTENSION}" == "dash" ] ||
-    [ "${FILE_EXTENSION}" == "ksh" ]; then
-    debug "$FILE is a valid shell script (has a valid extension: ${FILE_EXTENSION})"
-    return 0
-  fi
-
-  if [[ "${GET_FILE_TYPE_CMD}" == *"POSIX shell script"* ]] ||
-    [[ ${GET_FILE_TYPE_CMD} == *"Bourne-Again shell script"* ]] ||
-    [[ ${GET_FILE_TYPE_CMD} == *"dash script"* ]] ||
-    [[ ${GET_FILE_TYPE_CMD} == *"ksh script"* ]] ||
-    [[ ${GET_FILE_TYPE_CMD} == *"/usr/bin/env sh script"* ]]; then
-    debug "$FILE is a valid shell script (has a valid file type: ${GET_FILE_TYPE_CMD})"
-    return 0
-  fi
-
-  debug "$FILE is NOT a supported shell script. Skipping"
-  return 1
 }
 
 # HasNoShebang returns true if a file has no shebang line
@@ -249,28 +198,24 @@ function IsGenerated() {
 function IsNotSymbolicLink() {
   local FILE="$1"
 
-  debug "Checking if ${FILE} is not a symbolic link..."
-
   if [[ -L "${FILE}" ]]; then
     debug "${FILE} is a symbolic link"
     return 1
   else
-    debug "${FILE} is NOT a symbolic link"
     return 0
   fi
 }
 
 # We need these functions when building the file list with parallel
-export -f CheckFileType
-export -f DetectActions
+export -f DetectGitHubActionsWorkflows
+export -f DetectDependabot
+export -f DetectGitHubActions
 export -f DetectARMFile
 export -f DetectAWSStatesFIle
 export -f DetectCloudFormationFile
 export -f DetectKubernetesFile
 export -f DetectOpenAPIFile
 export -f GetFileExtension
-export -f GetFileType
-export -f IsValidShellScript
 export -f HasNoShebang
 export -f IsGenerated
 export -f IsNotSymbolicLink
@@ -330,22 +275,25 @@ function RunAdditionalInstalls() {
   # Run installs for R language #
   ###############################
   if [ "${VALIDATE_R}" == "true" ] && [ -e "${FILE_ARRAYS_DIRECTORY_PATH}/file-array-R" ]; then
-    info "Detected R Language files to lint."
-    info "Installing the R package in: ${GITHUB_WORKSPACE}"
-    local BUILD_CMD
-    if ! BUILD_CMD=$(R CMD build "${GITHUB_WORKSPACE}" 2>&1); then
-      warn "Failed to build R package in ${GITHUB_WORKSPACE}. Output: ${BUILD_CMD}"
-    else
-      local BUILD_PKG
-      if ! BUILD_PKG=$(cd "${GITHUB_WORKSPACE}" && echo *.tar.gz 2>&1); then
-        warn "Failed to echo R archives. Output: ${BUILD_PKG}"
+    debug "Detected R Language files to lint."
+
+    if [[ -e "${GITHUB_WORKSPACE}/DESCRIPTION" ]]; then
+      debug "Installing the R package in: ${GITHUB_WORKSPACE}"
+      local BUILD_CMD
+      if ! BUILD_CMD=$(R CMD build "${GITHUB_WORKSPACE}" 2>&1); then
+        warn "Failed to build R package in ${GITHUB_WORKSPACE}. Output: ${BUILD_CMD}"
+      else
+        local BUILD_PKG
+        if ! BUILD_PKG=$(cd "${GITHUB_WORKSPACE}" && echo *.tar.gz 2>&1); then
+          warn "Failed to echo R archives. Output: ${BUILD_PKG}"
+        fi
+        debug "echo R archives output: ${BUILD_PKG}"
+        local INSTALL_CMD
+        if ! INSTALL_CMD=$(cd "${GITHUB_WORKSPACE}" && R -e "remotes::install_local('.', dependencies=T)" 2>&1); then
+          warn "Failed to install the R package. Output: ${BUILD_PKG}]"
+        fi
+        debug "R package install output: ${INSTALL_CMD}"
       fi
-      debug "echo R archives output: ${BUILD_PKG}"
-      local INSTALL_CMD
-      if ! INSTALL_CMD=$(cd "${GITHUB_WORKSPACE}" && R -e "remotes::install_local('.', dependencies=T)" 2>&1); then
-        warn "Failed to install the R package. Output: ${BUILD_PKG}]"
-      fi
-      debug "R package install output: ${INSTALL_CMD}"
     fi
 
     if [ ! -f "${R_RULES_FILE_PATH_IN_ROOT}" ]; then
@@ -404,34 +352,16 @@ function RunAdditionalInstalls() {
       fi
     done
   fi
-
-  if [ "${VALIDATE_TERRAFORM_TERRASCAN}" == "true" ] && [ -e "${FILE_ARRAYS_DIRECTORY_PATH}/file-array-TERRAFORM_TERRASCAN" ]; then
-    info "Initializing Terrascan repository"
-    local -a TERRASCAN_INIT_COMMAND
-    TERRASCAN_INIT_COMMAND=(terrascan init -c "${TERRAFORM_TERRASCAN_LINTER_RULES}")
-    if [[ "${LOG_DEBUG}" == "true" ]]; then
-      TERRASCAN_INIT_COMMAND+=(--log-level "debug")
-    fi
-    debug "Terrascan init command: ${TERRASCAN_INIT_COMMAND[*]}"
-
-    local TERRASCAN_INIT_COMMAND_OUTPUT
-    if ! TERRASCAN_INIT_COMMAND_OUTPUT="$("${TERRASCAN_INIT_COMMAND[@]}" 2>&1)"; then
-      fatal "Error while initializing Terrascan:\n${TERRASCAN_INIT_COMMAND_OUTPUT}"
-    fi
-    debug "Terrascan init command output:\n${TERRASCAN_INIT_COMMAND_OUTPUT}"
-  fi
 }
 
 function IsAnsibleDirectory() {
   local FILE
   FILE="$1"
 
-  debug "Checking if ${FILE} is the Ansible directory (${ANSIBLE_DIRECTORY})"
   if [[ ("${FILE}" =~ .*${ANSIBLE_DIRECTORY}.*) ]] && [[ -d "${FILE}" ]]; then
     debug "${FILE} is the Ansible directory"
     return 0
   else
-    debug "${FILE} is not the Ansible directory"
     return 1
   fi
 }

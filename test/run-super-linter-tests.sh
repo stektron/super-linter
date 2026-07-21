@@ -12,10 +12,10 @@ TEST_FUNCTION_NAME="${2}"
 SUPER_LINTER_CONTAINER_IMAGE_TYPE="${3}"
 debug "Super-linter container image type: ${SUPER_LINTER_CONTAINER_IMAGE_TYPE}"
 
-COMMAND_TO_RUN=(docker run --rm -t -e DEFAULT_BRANCH="${DEFAULT_BRANCH}" -e ENABLE_GITHUB_ACTIONS_GROUP_TITLE="true")
+COMMAND_TO_RUN=(docker run --rm -t -e ENABLE_GITHUB_ACTIONS_GROUP_TITLE="true")
 
 ignore_test_cases() {
-  COMMAND_TO_RUN+=(-e FILTER_REGEX_EXCLUDE=".*(/test/linters/|CHANGELOG.md|/test/data/test-repository-contents/).*")
+  COMMAND_TO_RUN+=(-e FILTER_REGEX_EXCLUDE=".*(/test/linters/|CHANGELOG.md|/test/data/detect-files-scripts/|/test/data/test-repository-contents/).*")
 }
 
 configure_command_arguments_for_test_git_repository() {
@@ -23,16 +23,76 @@ configure_command_arguments_for_test_git_repository() {
   local GITHUB_EVENT_FILE_PATH="${1}" && shift
   local GITHUB_EVENT_NAME="${1}" && shift
 
-  cp -v "${GITHUB_EVENT_FILE_PATH}" "${GIT_REPOSITORY_PATH}/"
+  local GITHUB_EVENT_FILE_DESTINATION_PATH
+  GITHUB_EVENT_FILE_DESTINATION_PATH="${GIT_REPOSITORY_PATH}/$(basename "${GITHUB_EVENT_FILE_PATH}")"
+  cp -v "${GITHUB_EVENT_FILE_PATH}" "${GITHUB_EVENT_FILE_DESTINATION_PATH}"
+
+  local PRETTIER_CONFIG_FILE_DESTINATION_PATH="${GIT_REPOSITORY_PATH}/${PRETTIER_CONFIG_FILE_NAME}"
+  cp -v "${PRETTIER_CONFIG_FILE_NAME}" "${PRETTIER_CONFIG_FILE_DESTINATION_PATH}"
 
   # shellcheck disable=SC2034
-  RUN_LOCAL=false
+  RUN_LOCAL="${RUN_LOCAL:-"false"}"
   SUPER_LINTER_WORKSPACE="${GIT_REPOSITORY_PATH}"
-  COMMAND_TO_RUN+=(-e GITHUB_WORKSPACE="/tmp/lint")
-  COMMAND_TO_RUN+=(-e GITHUB_EVENT_NAME="${GITHUB_EVENT_NAME}")
-  COMMAND_TO_RUN+=(-e GITHUB_EVENT_PATH="/tmp/lint/$(basename "${GITHUB_EVENT_FILE_PATH}")")
+  COMMAND_TO_RUN+=(-e GITHUB_WORKSPACE="${DEFAULT_SUPER_LINTER_WORKSPACE}")
+
+  if [[ "${RUN_LOCAL:-"false"}" == "false" ]]; then
+    COMMAND_TO_RUN+=(-e GITHUB_EVENT_NAME="${GITHUB_EVENT_NAME}")
+    COMMAND_TO_RUN+=(-e GITHUB_EVENT_PATH="${DEFAULT_SUPER_LINTER_WORKSPACE}/$(basename "${GITHUB_EVENT_FILE_PATH}")")
+
+    local GIT_HEAD_REF
+    GIT_HEAD_REF="$(git -C "${GIT_REPOSITORY_PATH}" rev-parse "HEAD")"
+    local BASE_REF="refs/heads/${DEFAULT_BRANCH}"
+
+    local GIT_BASE_REF
+    if [[ -z "${GITHUB_BEFORE_SHA:-}" ]]; then
+      GIT_BASE_REF="${GITHUB_SHA_ALL_ZEROES}"
+    else
+      GIT_BASE_REF="${GITHUB_BEFORE_SHA}"
+    fi
+
+    # Update the GitHub event file in the temporary directory because Super-linter
+    # reads certain fields at runtime, such as pull_request.head.sha, and the
+    # values of these fields need to be computed because we create a new Git
+    # repository on each test run
+    if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+      # Update the pull_request.head.sha considering the test Git repository
+      local TEST_GIT_REPOSITORY_PULL_REQUEST_HEAD_SHA
+      # Get the second parent of the merge commit.
+      # For reference, the first parent of a merge commit is from the branch you
+      # were on when you merged, while the second parent of a merge commit is
+      # from the branch that was merged.
+      # Ref: https://git-scm.com/book/en/v2/Git-Tools-Revision-Selection
+      TEST_GIT_REPOSITORY_PULL_REQUEST_HEAD_SHA="$(git -C "${GIT_REPOSITORY_PATH}" rev-parse "HEAD^2")"
+      debug "Updating the pull_request.head.sha field of ${GITHUB_EVENT_FILE_DESTINATION_PATH} to: ${TEST_GIT_REPOSITORY_PULL_REQUEST_HEAD_SHA}"
+      # Use sed to avoid depending on jq
+      sed -i "s/pull-request-head-sha/${TEST_GIT_REPOSITORY_PULL_REQUEST_HEAD_SHA}/g" "${GITHUB_EVENT_FILE_DESTINATION_PATH}"
+    elif [[ "${GITHUB_EVENT_NAME}" == "merge_group" ]]; then
+      debug "Updating the head_sha field of ${GITHUB_EVENT_FILE_DESTINATION_PATH} to: ${GIT_HEAD_REF}"
+      sed -i "s/merge-group-head-sha/${GITHUB_BEFORE_SHA}/g" "${GITHUB_EVENT_FILE_DESTINATION_PATH}"
+      debug "Updating the base_ref field of ${GITHUB_EVENT_FILE_DESTINATION_PATH} to: ${BASE_REF}"
+      sed -i "s|refs/heads/main|${BASE_REF}|g" "${GITHUB_EVENT_FILE_DESTINATION_PATH}"
+      debug "Updating the base_sha field of ${GITHUB_EVENT_FILE_DESTINATION_PATH} to: ${GIT_BASE_REF}"
+      sed -i "s/merge-group-base-sha/${GIT_BASE_REF}/g" "${GITHUB_EVENT_FILE_DESTINATION_PATH}"
+    elif [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+      debug "Updating the after field of ${GITHUB_EVENT_FILE_DESTINATION_PATH} to: ${GIT_HEAD_REF}"
+      sed -i "s/push-after/${GIT_HEAD_REF}/g" "${GITHUB_EVENT_FILE_DESTINATION_PATH}"
+      debug "Updating the before field of ${GITHUB_EVENT_FILE_DESTINATION_PATH} to: ${GIT_BASE_REF}"
+      sed -i "s/push-before/${GIT_BASE_REF}/g" "${GITHUB_EVENT_FILE_DESTINATION_PATH}"
+      debug "Updating the first pushed commit hash field of ${GITHUB_EVENT_FILE_DESTINATION_PATH} to: ${FIRST_COMMIT_HASH}"
+      sed -i "s/first-pushed-commit-hash/${FIRST_COMMIT_HASH}/g" "${GITHUB_EVENT_FILE_DESTINATION_PATH}"
+    elif [[ "${GITHUB_EVENT_NAME}" == "repository_dispatch" ]]; then
+      debug "Updating the client_payload.ref field of ${GITHUB_EVENT_FILE_DESTINATION_PATH} to: ${BASE_REF}"
+      sed -i "s|base-ref|${BASE_REF}|g" "${GITHUB_EVENT_FILE_DESTINATION_PATH}"
+      debug "Updating the client_payload.sha field of ${GITHUB_EVENT_FILE_DESTINATION_PATH} to: ${GIT_HEAD_REF}"
+      sed -i "s/repository-dispatch-head-sha/${GIT_HEAD_REF}/g" "${GITHUB_EVENT_FILE_DESTINATION_PATH}"
+    else
+      fatal "GitHub ${GITHUB_EVENT_NAME:-"not set"} event not supported"
+    fi
+  fi
+
+  COMMAND_TO_RUN+=(-e ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT=false)
   COMMAND_TO_RUN+=(-e MULTI_STATUS=false)
-  COMMAND_TO_RUN+=(-e VALIDATE_ALL_CODEBASE=false)
+  COMMAND_TO_RUN+=(-e VALIDATE_ALL_CODEBASE="${VALIDATE_ALL_CODEBASE:-"false"}")
   COMMAND_TO_RUN+=(-e VALIDATE_JSON="true")
 }
 
@@ -55,12 +115,21 @@ configure_git_commitlint_test_cases() {
 
 configure_linters_for_test_cases() {
   COMMAND_TO_RUN+=(-e TEST_CASE_RUN="true" -e JSCPD_CONFIG_FILE=".jscpd-test-linters.json" -e TRIVY_CONFIG_FILE="trivy-test-linters.yaml" -e RENOVATE_SHAREABLE_CONFIG_PRESET_FILE_NAMES="default.json,hoge.json")
+  COMMAND_TO_RUN+=(-e PRE_COMMIT_CONFIG_FILE=".pre-commit-config-test-linters.yaml")
   configure_git_commitlint_test_cases
+}
+
+configure_use_find_algorithm() {
+  COMMAND_TO_RUN+=(-e USE_FIND_ALGORITHM="true")
+  # unset DEFAULT_BRANCH because it's defined in testUtils.sh, and it's a config
+  # error to set USE_FIND_ALGORITHM=true and DEFAULT_BRANCH
+  unset DEFAULT_BRANCH
 }
 
 run_test_cases_expect_failure() {
   configure_linters_for_test_cases
   COMMAND_TO_RUN+=(-e ANSIBLE_DIRECTORY="/test/linters/ansible/bad" -e CHECKOV_FILE_NAME=".checkov-test-linters-failure.yaml" -e FILTER_REGEX_INCLUDE=".*bad.*")
+  COMMAND_TO_RUN+=(-e PRE_COMMIT_CONFIG_FILE=".pre-commit-config-test-linters-failure.yaml")
   EXPECTED_EXIT_CODE=1
   EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH="test/data/super-linter-summary/markdown/table/expected-summary-test-linters-expect-failure-${SUPER_LINTER_CONTAINER_IMAGE_TYPE}.md"
 }
@@ -68,10 +137,75 @@ run_test_cases_expect_failure() {
 run_test_cases_expect_success() {
   configure_linters_for_test_cases
   COMMAND_TO_RUN+=(-e ANSIBLE_DIRECTORY="/test/linters/ansible/good" -e CHECKOV_FILE_NAME=".checkov-test-linters-success.yaml" -e FILTER_REGEX_INCLUDE=".*good.*")
+  COMMAND_TO_RUN+=(-e PRE_COMMIT_CONFIG_FILE=".pre-commit-config-test-linters-success.yaml")
   EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH="test/data/super-linter-summary/markdown/table/expected-summary-test-linters-expect-success-${SUPER_LINTER_CONTAINER_IMAGE_TYPE}.md"
 }
 
-run_test_cases_log_level() {
+configure_bash_exec_ignore_libraries_test_case() {
+  local EXPECTED_EXIT_CODE="${1}"
+  local GIT_REPOSITORY_PATH
+  GIT_REPOSITORY_PATH="$(mktemp -d)"
+
+  local GITHUB_EVENT_NAME="push"
+
+  initialize_git_repository "${GIT_REPOSITORY_PATH}"
+  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" "2" "true" "${GITHUB_EVENT_NAME}" "true" "false" "false" "true" "false"
+
+  local TEST_FILES_DIRECTORY_NAME
+  if [[ "${EXPECTED_EXIT_CODE}" -eq 0 ]]; then
+    TEST_FILES_DIRECTORY_NAME="good"
+  else
+    TEST_FILES_DIRECTORY_NAME="bad"
+  fi
+  cp -rv "test/linters/bash_exec_ignore_libraries_true/${TEST_FILES_DIRECTORY_NAME}/"* "${GIT_REPOSITORY_PATH}/"
+
+  VALIDATE_ALL_CODEBASE="true"
+
+  configure_command_arguments_for_test_git_repository "${GIT_REPOSITORY_PATH}" "test/data/github-event/github-event-push-multiple-commits.json" "${GITHUB_EVENT_NAME}"
+  COMMAND_TO_RUN+=(-e VALIDATE_BASH_EXEC="true")
+
+  configure_use_find_algorithm
+
+  COMMAND_TO_RUN+=(-e BASH_EXEC_IGNORE_LIBRARIES="true")
+}
+
+run_test_cases_bash_exec_ignore_libraries_expect_success() {
+  configure_bash_exec_ignore_libraries_test_case "0"
+
+  EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH="test/data/super-linter-summary/markdown/table/expected-summary-test-linters-bash-exec-ignore-libraries-expect-success.md"
+}
+
+run_test_cases_bash_exec_ignore_libraries_expect_failure() {
+  # 2 because the JSON linter will report a success
+  # (2 means that at least one linter reported a success, and at least one
+  # linter reported an error)
+  EXPECTED_EXIT_CODE=2
+  configure_bash_exec_ignore_libraries_test_case "${EXPECTED_EXIT_CODE}"
+
+  EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH="test/data/super-linter-summary/markdown/table/expected-summary-test-linters-bash-exec-ignore-libraries-expect-failure.md"
+}
+
+run_test_cases_expect_failure_suppress_output_on_success() {
+  run_test_cases_expect_failure
+  COMMAND_TO_RUN+=(-e SUPPRESS_OUTPUT_ON_SUCCESS="true")
+}
+
+run_test_cases_expect_success_suppress_output_on_success() {
+  run_test_cases_expect_success
+  COMMAND_TO_RUN+=(-e SUPPRESS_OUTPUT_ON_SUCCESS="true")
+}
+
+run_test_cases_expect_failure_suppress_output_on_success_notice_log() {
+  run_test_cases_expect_failure_suppress_output_on_success
+  LOG_LEVEL="NOTICE"
+}
+
+run_test_cases_expect_success_suppress_output_on_success_notice_log() {
+  run_test_cases_expect_success_suppress_output_on_success
+  LOG_LEVEL="NOTICE"
+}
+
+run_test_cases_expect_success_notice_log() {
   run_test_cases_expect_success
   LOG_LEVEL="NOTICE"
 }
@@ -84,16 +218,6 @@ run_test_cases_expect_failure_notice_log() {
 run_test_cases_non_default_home() {
   run_test_cases_expect_success
   COMMAND_TO_RUN+=(-e HOME=/tmp)
-}
-
-run_test_case_bash_exec_library_expect_failure() {
-  run_test_cases_expect_failure
-  COMMAND_TO_RUN+=(-e BASH_EXEC_IGNORE_LIBRARIES="true")
-}
-
-run_test_case_bash_exec_library_expect_success() {
-  run_test_cases_expect_success
-  COMMAND_TO_RUN+=(-e BASH_EXEC_IGNORE_LIBRARIES="true")
 }
 
 run_test_case_dont_save_super_linter_log_file() {
@@ -111,18 +235,48 @@ run_test_case_git_initial_commit() {
   GIT_REPOSITORY_PATH="$(mktemp -d)"
 
   initialize_git_repository "${GIT_REPOSITORY_PATH}"
-  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" 1 "false" "push" "false" "false" "false"
-  configure_command_arguments_for_test_git_repository "${GIT_REPOSITORY_PATH}" "test/data/github-event/github-event-push.json" "push"
+  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" 0 "false" "push" "false" "true" "false" "true" "false"
+  configure_command_arguments_for_test_git_repository "${GIT_REPOSITORY_PATH}" "test/data/github-event/github-event-push-initial-commit.json" "push"
   initialize_github_sha "${GIT_REPOSITORY_PATH}"
+
+  EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH="test/data/super-linter-summary/markdown/table/expected-summary-test-github-event-success-json.md"
 }
 
-run_test_case_merge_commit_push() {
+run_test_case_github_push_initial_commit_multiple_commits() {
   local GIT_REPOSITORY_PATH
   GIT_REPOSITORY_PATH="$(mktemp -d)"
 
   initialize_git_repository "${GIT_REPOSITORY_PATH}"
-  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" "4" "true" "push" "true" "false" "false"
+  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" 1 "false" "push" "false" "true" "false" "true" "false"
+  configure_command_arguments_for_test_git_repository "${GIT_REPOSITORY_PATH}" "test/data/github-event/github-event-push-initial-commit-multiple-commits.json" "push"
+  initialize_github_sha "${GIT_REPOSITORY_PATH}"
+}
+
+run_test_case_merge_commit_push_default_branch() {
+  local GIT_REPOSITORY_PATH
+  GIT_REPOSITORY_PATH="$(mktemp -d)"
+
+  initialize_git_repository "${GIT_REPOSITORY_PATH}"
+  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" "4" "true" "push" "true" "false" "false" "true" "false"
   configure_command_arguments_for_test_git_repository "${GIT_REPOSITORY_PATH}" "test/data/github-event/github-event-push-merge-commit.json" "push"
+}
+
+run_test_case_github_push_force_push() {
+  local GIT_REPOSITORY_PATH
+  GIT_REPOSITORY_PATH="$(mktemp -d)"
+
+  initialize_git_repository "${GIT_REPOSITORY_PATH}"
+  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" "1" "true" "push" "true" "false" "false" "true" "false"
+  configure_command_arguments_for_test_git_repository "${GIT_REPOSITORY_PATH}" "test/data/github-event/github-event-push-force-push.json" "push"
+}
+
+run_test_case_github_push_force_push_multiple_commits() {
+  local GIT_REPOSITORY_PATH
+  GIT_REPOSITORY_PATH="$(mktemp -d)"
+
+  initialize_git_repository "${GIT_REPOSITORY_PATH}"
+  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" "3" "true" "push" "true" "false" "false" "true" "false"
+  configure_command_arguments_for_test_git_repository "${GIT_REPOSITORY_PATH}" "test/data/github-event/github-event-push-force-push-multiple-commits.json" "push"
 }
 
 run_test_case_github_merge_group_event() {
@@ -130,8 +284,17 @@ run_test_case_github_merge_group_event() {
   GIT_REPOSITORY_PATH="$(mktemp -d)"
 
   initialize_git_repository "${GIT_REPOSITORY_PATH}"
-  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" "1" "true" "merge_group" "false" "false" "false"
+  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" "1" "true" "merge_group" "false" "false" "false" "true" "false"
   configure_command_arguments_for_test_git_repository "${GIT_REPOSITORY_PATH}" "test/data/github-event/github-event-merge-group.json" "merge_group"
+}
+
+run_test_case_github_repository_dispatch() {
+  local GIT_REPOSITORY_PATH
+  GIT_REPOSITORY_PATH="$(mktemp -d)"
+
+  initialize_git_repository "${GIT_REPOSITORY_PATH}"
+  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" "1" "true" "repository_dispatch" "false" "false" "false" "true" "false"
+  configure_command_arguments_for_test_git_repository "${GIT_REPOSITORY_PATH}" "test/data/github-event/github-event-repository-dispatch.json" "repository_dispatch"
 }
 
 run_test_case_merge_commit_push_tag() {
@@ -139,7 +302,7 @@ run_test_case_merge_commit_push_tag() {
   GIT_REPOSITORY_PATH="$(mktemp -d)"
 
   initialize_git_repository "${GIT_REPOSITORY_PATH}"
-  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" "4" "true" "push" "true" "false" "false"
+  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" "4" "true" "push" "true" "true" "false" "true" "false"
   configure_command_arguments_for_test_git_repository "${GIT_REPOSITORY_PATH}" "test/data/github-event/github-event-push-tag-merge-commit.json" "push"
   git -C "${GIT_REPOSITORY_PATH}" tag "v1.0.1-beta"
   git_log_graph "${GIT_REPOSITORY_PATH}"
@@ -153,42 +316,38 @@ configure_test_case_github_event_multiple_commits() {
   GIT_REPOSITORY_PATH="$(mktemp -d)"
 
   initialize_git_repository "${GIT_REPOSITORY_PATH}"
-  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" "${COMMITS_TO_CREATE}" "true" "${GITHUB_EVENT_NAME}" "true" "false" "false"
+  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" "${COMMITS_TO_CREATE}" "true" "${GITHUB_EVENT_NAME}" "true" "false" "false" "true" "false"
   configure_command_arguments_for_test_git_repository "${GIT_REPOSITORY_PATH}" "${GITHUB_EVENT_FILE_PATH}" "${GITHUB_EVENT_NAME}"
   cp commitlint.config.js "${GIT_REPOSITORY_PATH}/"
-
-  if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-    # Update the GitHub event file in the temporary directory because Super-linter
-    # reads certain fields at runtime, such as pull_request.head.sha, and the
-    # values of these fields need to be computed because we create a new Git
-    # repository on each test run
-    local GITHUB_EVENT_FILE_DESTINATION_PATH
-    GITHUB_EVENT_FILE_DESTINATION_PATH="${GIT_REPOSITORY_PATH}/$(basename "${GITHUB_EVENT_FILE_PATH}")"
-
-    # Update the pull_request.head.sha considering the test Git repository
-    local TEST_GIT_REPOSITORY_PULL_REQUEST_HEAD_SHA
-    TEST_GIT_REPOSITORY_PULL_REQUEST_HEAD_SHA="$(git -C "${GIT_REPOSITORY_PATH}" rev-parse "HEAD^2")"
-    debug "Updating the pull_request.head.sha field of ${GITHUB_EVENT_FILE_DESTINATION_PATH} to: ${TEST_GIT_REPOSITORY_PULL_REQUEST_HEAD_SHA}"
-    sed -i "s/fa386af5d523fabb5df5d1bae53b8984dfbf4ff0/${TEST_GIT_REPOSITORY_PULL_REQUEST_HEAD_SHA}/g" "${GITHUB_EVENT_FILE_DESTINATION_PATH}"
-  fi
 
   COMMAND_TO_RUN+=(--env ENABLE_COMMITLINT_STRICT_MODE="true")
   COMMAND_TO_RUN+=(--env ENFORCE_COMMITLINT_CONFIGURATION_CHECK="true")
   COMMAND_TO_RUN+=(--env VALIDATE_GIT_COMMITLINT="true")
+
+  EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH="test/data/super-linter-summary/markdown/table/expected-summary-test-github-event-success-json-commitlint.md"
 }
 
 run_test_case_github_pr_event_multiple_commits() {
   configure_test_case_github_event_multiple_commits "pull_request" "test/data/github-event/github-event-pull-request-multiple-commits.json" "3"
 }
 
-run_test_case_github_push_event_multiple_commits() {
+run_test_case_github_push_event_multiple_commits_default_branch() {
   configure_test_case_github_event_multiple_commits "push" "test/data/github-event/github-event-push-multiple-commits.json" "2"
 }
 
-run_test_case_use_find_and_ignore_gitignored_files() {
-  ignore_test_cases
+run_test_case_github_push_event_multiple_commits_use_find_algorithm_default_branch() {
+  RUN_LOCAL="false"
+  VALIDATE_ALL_CODEBASE="true"
+  configure_test_case_github_event_multiple_commits "push" "test/data/github-event/github-event-push-multiple-commits.json" "2"
+  configure_use_find_algorithm
+  # Override GITHUB_SHA to point to a non-existing commit SHA to ensure that
+  # Super-linter doesn't try to get validate it when USE_FIND_ALGORITHM=true
+  COMMAND_TO_RUN+=(-e GITHUB_SHA="non-existing-sha")
+}
+
+run_test_case_github_push_event_multiple_commits_use_find_and_ignore_gitignored_files() {
+  run_test_case_github_push_event_multiple_commits_use_find_algorithm_default_branch
   COMMAND_TO_RUN+=(-e IGNORE_GITIGNORED_FILES="true")
-  COMMAND_TO_RUN+=(-e USE_FIND_ALGORITHM="true")
 }
 
 run_test_cases_save_super_linter_output() {
@@ -198,22 +357,59 @@ run_test_cases_save_super_linter_output() {
 run_test_cases_save_super_linter_output_custom_path() {
   run_test_cases_save_super_linter_output
   SUPER_LINTER_OUTPUT_DIRECTORY_NAME="custom-super-linter-output-directory-name"
+  EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH="test/data/super-linter-summary/markdown/table/expected-summary-test-linters-expect-success-custom-output-dir-${SUPER_LINTER_CONTAINER_IMAGE_TYPE}.md"
 }
 
 run_test_case_custom_summary() {
   run_test_cases_expect_success
   SUPER_LINTER_SUMMARY_FILE_NAME="custom-github-step-summary.md"
+  EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH="test/data/super-linter-summary/markdown/table/expected-summary-test-linters-expect-success-custom-summary-file-name-${SUPER_LINTER_CONTAINER_IMAGE_TYPE}.md"
 }
 
-run_test_case_gitleaks_custom_log_level() {
-  run_test_cases_expect_success
-  COMMAND_TO_RUN+=(--env GITLEAKS_LOG_LEVEL="warn")
+configure_git_worktree_test_cases() {
+  local GIT_REPOSITORY_PATH="${1}"
+
+  initialize_git_repository "${GIT_REPOSITORY_PATH}"
+  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" "1" "false" "push" "false" "false" "false" "false" "false"
+
+  local GIT_WORKTREE_PATH
+  GIT_WORKTREE_PATH="$(mktemp -d)"
+  initialize_temp_directory_cleanup_traps "${GIT_WORKTREE_PATH}"
+
+  debug "Initializing Git worktree: ${GIT_WORKTREE_PATH}"
+  git -C "${GIT_REPOSITORY_PATH}" worktree add "${GIT_WORKTREE_PATH}"
+
+  debug "Git worktree list (verbose)"
+  git -C "${GIT_REPOSITORY_PATH}" worktree list --verbose
+
+  debug "Git worktree list (porcelain, nul-terminated)"
+  git -C "${GIT_REPOSITORY_PATH}" worktree list --porcelain -z
+  # Add a newline after the nul-terminated string
+  echo
+
+  debug ".git worktree contents:\n$(cat "${GIT_WORKTREE_PATH}/.git")"
+
+  RUN_LOCAL="true"
+  SAVE_SUPER_LINTER_OUTPUT="false"
+
+  configure_command_arguments_for_test_git_repository "${GIT_WORKTREE_PATH}" "test/data/github-event/github-event-push.json" "push"
 }
 
-run_test_case_linter_command_options() {
-  run_test_cases_expect_success
-  # Pick one arbitrary linter to pass options to
-  COMMAND_TO_RUN+=(--env GITLEAKS_COMMAND_OPTIONS="--verbose")
+run_test_case_git_invalid_worktree() {
+  local GIT_REPOSITORY_PATH
+  GIT_REPOSITORY_PATH="$(mktemp -d)"
+
+  configure_git_worktree_test_cases "${GIT_REPOSITORY_PATH}"
+  EXPECTED_EXIT_CODE=1
+}
+
+run_test_case_git_valid_worktree() {
+  local GIT_REPOSITORY_PATH
+  GIT_REPOSITORY_PATH="$(mktemp -d)"
+
+  configure_git_worktree_test_cases "${GIT_REPOSITORY_PATH}"
+  debug "Mounting the main Git repository (${GIT_REPOSITORY_PATH}) so Super-linter can access the common Git objects"
+  COMMAND_TO_RUN+=(-v "${GIT_REPOSITORY_PATH}:${GIT_REPOSITORY_PATH}")
 }
 
 run_test_case_fix_mode() {
@@ -221,7 +417,7 @@ run_test_case_fix_mode() {
 
   GIT_REPOSITORY_PATH="$(mktemp -d)"
   initialize_git_repository "${GIT_REPOSITORY_PATH}"
-  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" 1 "false" "push" "false" "false" "false"
+  initialize_git_repository_contents "${GIT_REPOSITORY_PATH}" 1 "false" "push" "false" "false" "false" "true" "false"
   configure_command_arguments_for_test_git_repository "${GIT_REPOSITORY_PATH}" "test/data/github-event/github-event-push.json" "push"
 
   # Remove leftovers before copying test files because other tests might have
@@ -229,8 +425,10 @@ run_test_case_fix_mode() {
   # need access to those files might fail if they run as a non-root user.
   RemoveTestLeftovers
 
-  local LINTERS_TEST_CASES_FIX_MODE_DESTINATION_PATH="${GIT_REPOSITORY_PATH}/${LINTERS_TEST_CASE_DIRECTORY}"
+  local LINTERS_TEST_CASES_FIX_MODE_DESTINATION_PATH="${GIT_REPOSITORY_PATH}/${TEST_CASE_FOLDER}"
   mkdir -p "${LINTERS_TEST_CASES_FIX_MODE_DESTINATION_PATH}"
+
+  configure_linters_for_fix_mode
 
   for LANGUAGE in "${LANGUAGES_WITH_FIX_MODE[@]}"; do
     if [[ "${SUPER_LINTER_CONTAINER_IMAGE_TYPE}" == "slim" ]] &&
@@ -239,9 +437,7 @@ run_test_case_fix_mode() {
       continue
     fi
     local -l LOWERCASE_LANGUAGE="${LANGUAGE}"
-    cp -rv "${LINTERS_TEST_CASE_DIRECTORY}/${LOWERCASE_LANGUAGE}" "${LINTERS_TEST_CASES_FIX_MODE_DESTINATION_PATH}/"
-    eval "COMMAND_TO_RUN+=(--env FIX_${LANGUAGE}=\"true\")"
-    eval "COMMAND_TO_RUN+=(--env VALIDATE_${LANGUAGE}=\"true\")"
+    cp -rv "${TEST_CASE_FOLDER}/${LOWERCASE_LANGUAGE}" "${LINTERS_TEST_CASES_FIX_MODE_DESTINATION_PATH}/"
   done
 
   # Copy gitignore so we don't commit eventual leftovers from previous runs
@@ -254,6 +450,7 @@ run_test_case_fix_mode() {
   cp -rv "test/linters-config/fix-mode/." "${FIX_MODE_LINTERS_CONFIG_DIR}/"
   cp -rv ".github/linters/eslint.config.mjs" "${FIX_MODE_LINTERS_CONFIG_DIR}/"
   cp -rv ".editorconfig" "${GIT_REPOSITORY_PATH}/"
+  cp -rv "prettier.config.js" "${GIT_REPOSITORY_PATH}/"
   git -C "${GIT_REPOSITORY_PATH}" add .
   git -C "${GIT_REPOSITORY_PATH}" commit --no-verify -m "feat: add fix mode test cases"
   initialize_github_sha "${GIT_REPOSITORY_PATH}"
@@ -270,6 +467,50 @@ run_test_case_fix_mode() {
   EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH="test/data/super-linter-summary/markdown/table/expected-summary-test-linters-fix-mode-${SUPER_LINTER_CONTAINER_IMAGE_TYPE}.md"
 }
 
+configure_linters_for_fix_mode() {
+  for LANGUAGE in "${LANGUAGES_WITH_FIX_MODE[@]}"; do
+    if [[ "${SUPER_LINTER_CONTAINER_IMAGE_TYPE}" == "slim" ]] &&
+      ! IsLanguageInSlimImage "${LANGUAGE}"; then
+      debug "Skip ${LANGUAGE} because it's not available in the Super-linter ${SUPER_LINTER_CONTAINER_IMAGE_TYPE} image"
+      continue
+    fi
+    debug "Enabling validate and fix mode for ${LANGUAGE}"
+    eval "COMMAND_TO_RUN+=(--env FIX_${LANGUAGE}=\"true\")"
+    eval "COMMAND_TO_RUN+=(--env VALIDATE_${LANGUAGE}=\"true\")"
+  done
+}
+
+configure_linters_for_super_linter_codebase() {
+  COMMAND_TO_RUN+=(--env GITLEAKS_CONFIG_FILE=".gitleaks-ignore-tests.toml")
+  VALIDATE_ALL_CODEBASE="true"
+
+  EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH="test/data/super-linter-summary/markdown/table/expected-summary-fix-mode-super-linter-code-base-${SUPER_LINTER_CONTAINER_IMAGE_TYPE}.md"
+}
+
+disable_dependency_security_audits() {
+  COMMAND_TO_RUN+=(--env VALIDATE_TRIVY="false")
+}
+
+fix_codebase() {
+  ignore_test_cases
+  configure_linters_for_super_linter_codebase
+  configure_linters_for_fix_mode
+
+  EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH="test/data/super-linter-summary/markdown/table/expected-summary-fix-codebase-success-${SUPER_LINTER_CONTAINER_IMAGE_TYPE}.md"
+}
+
+lint_codebase() {
+  ignore_test_cases
+  configure_linters_for_super_linter_codebase
+
+  # Disable dependency security audits because we have dedicated jobs for those,
+  # and we don't want to fail the whole linting job because vulnerabilities
+  # might not necessarily be fixable until patches are out.
+  disable_dependency_security_audits
+
+  EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH="test/data/super-linter-summary/markdown/table/expected-summary-lint-codebase-success-${SUPER_LINTER_CONTAINER_IMAGE_TYPE}.md"
+}
+
 # Run the test setup function
 ${TEST_FUNCTION_NAME}
 
@@ -278,7 +519,7 @@ debug "CREATE_LOG_FILE: ${CREATE_LOG_FILE}"
 SAVE_SUPER_LINTER_OUTPUT="${SAVE_SUPER_LINTER_OUTPUT:-true}"
 
 SUPER_LINTER_WORKSPACE="${SUPER_LINTER_WORKSPACE:-$(pwd)}"
-COMMAND_TO_RUN+=(-v "${SUPER_LINTER_WORKSPACE}":"/tmp/lint")
+COMMAND_TO_RUN+=(-v "${SUPER_LINTER_WORKSPACE}":"${DEFAULT_SUPER_LINTER_WORKSPACE}")
 
 if [ -n "${SUPER_LINTER_OUTPUT_DIRECTORY_NAME:-}" ]; then
   COMMAND_TO_RUN+=(-e SUPER_LINTER_OUTPUT_DIRECTORY_NAME="${SUPER_LINTER_OUTPUT_DIRECTORY_NAME}")
@@ -298,6 +539,9 @@ COMMAND_TO_RUN+=(-e LOG_LEVEL="${LOG_LEVEL:-"DEBUG"}")
 COMMAND_TO_RUN+=(-e RUN_LOCAL="${RUN_LOCAL:-true}")
 COMMAND_TO_RUN+=(-e SAVE_SUPER_LINTER_OUTPUT="${SAVE_SUPER_LINTER_OUTPUT}")
 
+if [[ -n "${DEFAULT_BRANCH:-}" ]]; then
+  COMMAND_TO_RUN+=(-e DEFAULT_BRANCH="${DEFAULT_BRANCH}")
+fi
 SUPER_LINTER_GITHUB_STEP_SUMMARY_FILE_PATH="${SUPER_LINTER_WORKSPACE}/github-step-summary.md"
 # We can't put this inside SUPER_LINTER_MAIN_OUTPUT_PATH because it doesn't exist
 # before Super-linter creates it, and we want to verify that as well.
@@ -353,15 +597,20 @@ SUPER_LINTER_EXIT_CODE=$?
 # Enable the errexit option that we check later
 set -o errexit
 
-# Remove leftovers after runnint tests because we don't want other tests
+# Remove leftovers after running tests because we don't want other tests
 # to consider them
 RemoveTestLeftovers
 
 debug "Super-linter workspace: ${SUPER_LINTER_WORKSPACE}"
 debug "Super-linter exit code: ${SUPER_LINTER_EXIT_CODE}"
 
-# Print the log graph again so we don't have to scroll all the way up
-git_log_graph "${SUPER_LINTER_WORKSPACE}"
+# Print the log graph again so we don't have to scroll all the way up.
+# Only print if we are running the test against a repository that's not the
+# Super-linter repository because we're not interested in the graph of the
+# Super-linter repository.
+if [[ "${SUPER_LINTER_WORKSPACE}" != "$(pwd)" ]]; then
+  git_log_graph "${SUPER_LINTER_WORKSPACE}"
+fi
 
 if [[ "${CREATE_LOG_FILE}" == true ]]; then
   if [ ! -e "${LOG_FILE_PATH}" ]; then
@@ -445,14 +694,14 @@ else
 fi
 
 if [ -n "${EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH:-}" ]; then
-  if ! AssertFileContentsMatchIgnoreHtmlComments "${SUPER_LINTER_SUMMARY_FILE_PATH}" "${EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH}"; then
+  if ! AssertSuperLinterSummaryMatches "${SUPER_LINTER_SUMMARY_FILE_PATH}" "${EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH}" "${SUPER_LINTER_EXIT_CODE}"; then
     debug "Super-linter summary (${SUPER_LINTER_SUMMARY_FILE_PATH}) contents don't match with the expected contents (${EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH})"
     exit 1
   else
     debug "Super-linter summary (${SUPER_LINTER_SUMMARY_FILE_PATH}) contents match with the expected contents (${EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH})"
   fi
 
-  if ! AssertFileContentsMatchIgnoreHtmlComments "${SUPER_LINTER_GITHUB_STEP_SUMMARY_FILE_PATH}" "${EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH}"; then
+  if ! AssertSuperLinterSummaryMatches "${SUPER_LINTER_GITHUB_STEP_SUMMARY_FILE_PATH}" "${EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH}" "${SUPER_LINTER_EXIT_CODE}"; then
     debug "Super-linter GitHub step summary (${SUPER_LINTER_SUMMARY_FILE_PATH}) contents don't match with the expected contents (${EXPECTED_SUPER_LINTER_SUMMARY_FILE_PATH})"
     exit 1
   else
@@ -499,9 +748,9 @@ if [[ "${VERIFY_FIX_MODE:-}" == "true" ]]; then
     fi
 
     declare -l LOWERCASE_LANGUAGE="${LANGUAGE}"
-    BAD_TEST_CASE_SOURCE_PATH="${LINTERS_TEST_CASE_DIRECTORY}/${LOWERCASE_LANGUAGE}"
+    BAD_TEST_CASE_SOURCE_PATH="${TEST_CASE_FOLDER}/${LOWERCASE_LANGUAGE}"
     debug "Source path to the ${LANGUAGE} test case expected to fail: ${BAD_TEST_CASE_SOURCE_PATH}"
-    BAD_TEST_CASE_DESTINATION_PATH="${SUPER_LINTER_WORKSPACE}/${LINTERS_TEST_CASE_DIRECTORY}/${LOWERCASE_LANGUAGE}"
+    BAD_TEST_CASE_DESTINATION_PATH="${SUPER_LINTER_WORKSPACE}/${TEST_CASE_FOLDER}/${LOWERCASE_LANGUAGE}"
     debug "Destination path to ${LANGUAGE} test case expected to fail: ${BAD_TEST_CASE_DESTINATION_PATH}"
 
     if [[ ! -e "${BAD_TEST_CASE_SOURCE_PATH}" ]]; then
@@ -514,6 +763,8 @@ if [[ "${VERIFY_FIX_MODE:-}" == "true" ]]; then
 
     if find "${BAD_TEST_CASE_DESTINATION_PATH}" \( -type f ! -readable -or -type d \( ! -readable -or ! -executable -or ! -writable \) \) -print | grep -q .; then
       if [[ "${LANGUAGE}" == "ANSIBLE" ]] ||
+        [[ "${LANGUAGE}" == "BIOME_FORMAT" ]] ||
+        [[ "${LANGUAGE}" == "BIOME_LINT" ]] ||
         [[ "${LANGUAGE}" == "DOTNET_SLN_FORMAT_ANALYZERS" ]] ||
         [[ "${LANGUAGE}" == "DOTNET_SLN_FORMAT_STYLE" ]] ||
         [[ "${LANGUAGE}" == "DOTNET_SLN_FORMAT_WHITESPACE" ]] ||
@@ -542,13 +793,26 @@ if [[ "${VERIFY_FIX_MODE:-}" == "true" ]]; then
   done
 fi
 
+# Check if Super-linter created files if any file to lint contains a subshell
+# Enable nullglob to prevent the loop from running if no files match
+shopt -s nullglob
+TEST_SUBSHELL_FILE_PATH="${SUPER_LINTER_WORKSPACE}/test-subshell-file"
+SUBSHELL_FILES=("${TEST_SUBSHELL_FILE_PATH}"*)
+if [ ${#SUBSHELL_FILES[@]} -gt 0 ]; then
+  ls -alh "${SUPER_LINTER_WORKSPACE}"
+  fatal "Found ${#SUBSHELL_FILES[@]} file(s) created by subshells, and they shouldn't been there: ${SUBSHELL_FILES[*]}"
+else
+  debug "Found no files created by subshells (${TEST_SUBSHELL_FILE_PATH}) in ${SUPER_LINTER_WORKSPACE}"
+fi
+shopt -u nullglob
+
 # Check if super-linter leaves leftovers behind
 declare -a TEMP_ITEMS_TO_CLEAN
 TEMP_ITEMS_TO_CLEAN=()
-TEMP_ITEMS_TO_CLEAN+=("$(pwd)/.lintr")
-TEMP_ITEMS_TO_CLEAN+=("$(pwd)/.mypy_cache")
-TEMP_ITEMS_TO_CLEAN+=("$(pwd)/.ruff_cache")
-TEMP_ITEMS_TO_CLEAN+=("$(pwd)/logback.log")
+TEMP_ITEMS_TO_CLEAN+=("${SUPER_LINTER_WORKSPACE}/.lintr")
+TEMP_ITEMS_TO_CLEAN+=("${SUPER_LINTER_WORKSPACE}/.mypy_cache")
+TEMP_ITEMS_TO_CLEAN+=("${SUPER_LINTER_WORKSPACE}/.ruff_cache")
+TEMP_ITEMS_TO_CLEAN+=("${SUPER_LINTER_WORKSPACE}/logback.log")
 
 for item in "${TEMP_ITEMS_TO_CLEAN[@]}"; do
   debug "Check if ${item} exists"
@@ -559,6 +823,9 @@ for item in "${TEMP_ITEMS_TO_CLEAN[@]}"; do
     debug "${item} does not exist as expected"
   fi
 done
+
+# Change ownership of .git dir back in case we have a devcontainer open
+sudo chown -R "$(id -u)":"$(id -g)" "$(pwd)/.git"
 
 if ! CheckUnexpectedGitChanges "$(pwd)"; then
   debug "There are unexpected modifications to the working directory after running tests."

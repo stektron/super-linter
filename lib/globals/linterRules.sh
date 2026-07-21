@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 
-LINTER_RULES_PATH="${LINTER_RULES_PATH:-.github/linters}" # Linter rules directory
+# Default rules files location
+# shellcheck disable=SC2034 # Variable is referenced indirectly
+DEFAULT_RULES_LOCATION="/action/lib/.automation"
+
+# Linter rules directory
+LINTER_RULES_PATH="${LINTER_RULES_PATH:-".github/linters"}"
 
 # shellcheck disable=SC2034  # Variable is referenced indirectly
 ANSIBLE_FILE_NAME="${ANSIBLE_CONFIG_FILE:-.ansible-lint.yml}"
@@ -12,18 +17,20 @@ CHECKOV_FILE_NAME="${CHECKOV_FILE_NAME:-".checkov.yaml"}"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
 CLANG_FORMAT_FILE_NAME="${CLANG_FORMAT_FILE_NAME:-".clang-format"}"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
-CLOJURE_FILE_NAME=".clj-kondo/config.edn"
+CLOJURE_FILE_NAME=".clj-kondo/config.edn" # codespell:ignore edn
 # shellcheck disable=SC2034  # Variable is referenced indirectly
 CLOUDFORMATION_FILE_NAME=".cfnlintrc.yml"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
 COFFEESCRIPT_FILE_NAME=".coffee-lint.json"
-CSS_FILE_NAME="${CSS_FILE_NAME:-.stylelintrc.json}"
+CSS_FILE_NAME="${CSS_FILE_NAME:-"stylelint.config.mjs"}"
 DOCKERFILE_HADOLINT_FILE_NAME="${DOCKERFILE_HADOLINT_FILE_NAME:-.hadolint.yaml}"
 EDITORCONFIG_FILE_NAME="${EDITORCONFIG_FILE_NAME:-.editorconfig-checker.json}"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
 GITHUB_ACTIONS_FILE_NAME="${GITHUB_ACTIONS_CONFIG_FILE:-actionlint.yml}"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
 GITHUB_ACTIONS_COMMAND_ARGS="${GITHUB_ACTIONS_COMMAND_ARGS:-null}"
+# shellcheck disable=SC2034
+GITHUB_ACTIONS_ZIZMOR_FILE_NAME="${GITHUB_ACTIONS_ZIZMOR_CONFIG_FILE:-"zizmor.yaml"}"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
 GITLEAKS_FILE_NAME="${GITLEAKS_CONFIG_FILE:-.gitleaks.toml}"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
@@ -62,6 +69,8 @@ PHP_PSALM_FILE_NAME="psalm.xml"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
 POWERSHELL_FILE_NAME="${POWERSHELL_CONFIG_FILE:-.powershell-psscriptanalyzer.psd1}"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
+PRE_COMMIT_FILE_NAME="${PRE_COMMIT_CONFIG_FILE:-.pre-commit-config.yaml}"
+# shellcheck disable=SC2034  # Variable is referenced indirectly
 PROTOBUF_FILE_NAME="${PROTOBUF_CONFIG_FILE:-.protolintrc.yml}"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
 PYTHON_BLACK_FILE_NAME="${PYTHON_BLACK_CONFIG_FILE:-.python-black}"
@@ -76,6 +85,8 @@ PYTHON_PYLINT_FILE_NAME="${PYTHON_PYLINT_CONFIG_FILE:-.python-lint}"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
 PYTHON_RUFF_FILE_NAME="${PYTHON_RUFF_CONFIG_FILE:-.ruff.toml}"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
+PYTHON_RUFF_FORMAT_FILE_NAME="${PYTHON_RUFF_FORMAT_CONFIG_FILE:-.ruff.toml}"
+# shellcheck disable=SC2034  # Variable is referenced indirectly
 R_FILE_NAME=".lintr"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
 RUBY_FILE_NAME="${RUBY_CONFIG_FILE:-.ruby-lint.yml}"
@@ -84,11 +95,11 @@ SCALAFMT_FILE_NAME="${SCALAFMT_CONFIG_FILE:-.scalafmt.conf}"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
 SNAKEMAKE_SNAKEFMT_FILE_NAME="${SNAKEMAKE_SNAKEFMT_CONFIG_FILE:-.snakefmt.toml}"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
+SPELL_CODESPELL_FILE_NAME="${SPELL_CODESPELL_CONFIG_FILE:-".codespellrc"}"
+# shellcheck disable=SC2034  # Variable is referenced indirectly
 SQLFLUFF_FILE_NAME="${SQLFLUFF_CONFIG_FILE:-/.sqlfluff}"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
 TERRAFORM_TFLINT_FILE_NAME="${TERRAFORM_TFLINT_CONFIG_FILE:-.tflint.hcl}"
-# shellcheck disable=SC2034  # Variable is referenced indirectly
-TERRAFORM_TERRASCAN_FILE_NAME="${TERRAFORM_TERRASCAN_CONFIG_FILE:-terrascan.toml}"
 # shellcheck disable=SC2034  # Variable is referenced indirectly
 TRIVY_FILE_NAME="${TRIVY_CONFIG_FILE:-"trivy.yaml"}"
 # shellcheck disable=SC2034  # Variable is referenced indirectly

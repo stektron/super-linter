@@ -11,15 +11,47 @@ function GetGithubPushEventCommitCount() {
   GITHUB_PUSH_COMMIT_COUNT="$(jq -r '.commits | length' <"${GITHUB_EVENT_FILE_PATH}")"
   local RET_CODE=$?
   if [[ "${RET_CODE}" -gt 0 ]]; then
-    fatal "Failed to initialize GITHUB_PUSH_COMMIT_COUNT for a push event. Output: ${GITHUB_PUSH_COMMIT_COUNT}"
+    error "Failed to initialize GITHUB_PUSH_COMMIT_COUNT for a push event. Output: ${GITHUB_PUSH_COMMIT_COUNT}"
+    return 1
   fi
 
   if IsUnsignedInteger "${GITHUB_PUSH_COMMIT_COUNT}" && [ -n "${GITHUB_PUSH_COMMIT_COUNT}" ]; then
     echo "${GITHUB_PUSH_COMMIT_COUNT}"
     return 0
   else
-    fatal "GITHUB_PUSH_COMMIT_COUNT is not an unsigned integer: ${GITHUB_PUSH_COMMIT_COUNT}"
+    error "GITHUB_PUSH_COMMIT_COUNT is not an unsigned integer: ${GITHUB_PUSH_COMMIT_COUNT}"
+    return 1
   fi
+}
+
+GetGitHubEventPushBefore() {
+  local GITHUB_EVENT_FILE_PATH
+  GITHUB_EVENT_FILE_PATH="${1}"
+  local -i GITHUB_PUSH_COMMIT_COUNT
+
+  GITHUB_PUSH_BEFORE="$(jq -r '.before' <"${GITHUB_EVENT_FILE_PATH}")"
+  local RET_CODE=$?
+  if [[ "${RET_CODE}" -gt 0 ]]; then
+    error "Failed to initialize GITHUB_PUSH_BEFORE for a push event. Output: ${GITHUB_PUSH_BEFORE}"
+    return 1
+  fi
+
+  echo "${GITHUB_PUSH_BEFORE}"
+}
+
+GetGitHubEventForced() {
+  local GITHUB_EVENT_FILE_PATH
+  GITHUB_EVENT_FILE_PATH="${1}"
+  local GITHUB_FORCED
+
+  GITHUB_FORCED="$(jq -r '.forced' <"${GITHUB_EVENT_FILE_PATH}")"
+  local RET_CODE=$?
+  if [[ "${RET_CODE}" -gt 0 ]]; then
+    error "Failed to initialize GITHUB_FORCED. Output: ${GITHUB_FORCED}"
+    return 1
+  fi
+
+  echo "${GITHUB_FORCED}"
 }
 
 function GetGithubPullRequestEventCommitCount() {
@@ -43,6 +75,21 @@ function GetGithubPullRequestEventCommitCount() {
   fi
 }
 
+GetPullRequestNumber() {
+  local GITHUB_EVENT_FILE_PATH
+  GITHUB_EVENT_FILE_PATH="${1}"
+  local GITHUB_PULL_REQUEST_NUMBER
+
+  GITHUB_PULL_REQUEST_NUMBER="$(jq -r '.number' <"${GITHUB_EVENT_FILE_PATH}")"
+  local RET_CODE=$?
+  if [[ "${RET_CODE}" -gt 0 ]]; then
+    error "Failed to initialize GITHUB_PULL_REQUEST_NUMBER. Output: ${GITHUB_PULL_REQUEST_NUMBER}"
+    return 1
+  fi
+
+  echo "${GITHUB_PULL_REQUEST_NUMBER}"
+}
+
 function GetGithubRepositoryDefaultBranch() {
   local GITHUB_EVENT_FILE_PATH
   GITHUB_EVENT_FILE_PATH="${1}"
@@ -51,7 +98,8 @@ function GetGithubRepositoryDefaultBranch() {
   GITHUB_REPOSITORY_DEFAULT_BRANCH=$(jq -r '.repository.default_branch' <"${GITHUB_EVENT_FILE_PATH}")
   local RET_CODE=$?
   if [[ "${RET_CODE}" -gt 0 ]]; then
-    fatal "Failed to initialize GITHUB_REPOSITORY_DEFAULT_BRANCH. Output: ${GITHUB_REPOSITORY_DEFAULT_BRANCH}"
+    error "Failed to initialize GITHUB_REPOSITORY_DEFAULT_BRANCH. Output: ${GITHUB_REPOSITORY_DEFAULT_BRANCH}"
+    return 1
   fi
 
   echo "${GITHUB_REPOSITORY_DEFAULT_BRANCH}"
@@ -65,8 +113,24 @@ function GetPullRequestHeadSha() {
   GITHUB_PULL_REQUEST_HEAD_SHA=$(jq -r '.pull_request.head.sha' <"${GITHUB_EVENT_FILE_PATH}")
   local RET_CODE=$?
   if [[ "${RET_CODE}" -gt 0 ]]; then
-    fatal "Failed to initialize GITHUB_PULL_REQUEST_HEAD_SHA. Output: ${GITHUB_PULL_REQUEST_HEAD_SHA}"
+    error "Failed to initialize GITHUB_PULL_REQUEST_HEAD_SHA. Output: ${GITHUB_PULL_REQUEST_HEAD_SHA}"
+    return 1
   fi
 
   echo "${GITHUB_PULL_REQUEST_HEAD_SHA}"
+}
+
+GetGithubPushFirstPushedCommitHash() {
+  local GITHUB_EVENT_FILE_PATH
+  GITHUB_EVENT_FILE_PATH="${1}"
+  local GITHUB_FIRST_PUSHED_COMMIT_HASH
+
+  GITHUB_FIRST_PUSHED_COMMIT_HASH=$(jq -r '.commits | if length > 0 then .[0].id else "null" end' <"${GITHUB_EVENT_FILE_PATH}")
+  local RET_CODE=$?
+  if [[ "${RET_CODE}" -gt 0 ]]; then
+    error "Failed to initialize GITHUB_FIRST_PUSHED_COMMIT_HASH. Output: ${GITHUB_FIRST_PUSHED_COMMIT_HASH}"
+    return 1
+  fi
+
+  echo "${GITHUB_FIRST_PUSHED_COMMIT_HASH}"
 }

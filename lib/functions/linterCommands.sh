@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# shellcheck disable=SC2034 # Disable ununsed variables warning because we
+# shellcheck disable=SC2034 # Disable unused variables warning because we
 # source this script and use these variables as globals
 
 # Load linter commands options so we don't need to load it every time we source
@@ -61,18 +61,6 @@ InitFixModeOptionsAndCommands() {
   fi
 }
 
-function InitInputConsumeCommands() {
-  LINTER_COMMANDS_ARRAY_ANSIBLE+=("${INPUT_CONSUME_COMMAND[@]}")
-  LINTER_COMMANDS_ARRAY_GO_MODULES+=("${INPUT_CONSUME_COMMAND[@]}")
-  LINTER_COMMANDS_ARRAY_RUST_CLIPPY+=("${INPUT_CONSUME_COMMAND[@]}")
-}
-
-function InitPowerShellCommand() {
-  debug "PowerShell command before initialization: ${LINTER_COMMANDS_ARRAY_POWERSHELL[*]}"
-  LINTER_COMMANDS_ARRAY_POWERSHELL=(pwsh -NoProfile -NoLogo -Command "\"${LINTER_COMMANDS_ARRAY_POWERSHELL[*]}; if (\\\${Error}.Count) { exit 1 }\"")
-  debug "PowerShell command after initialization: ${LINTER_COMMANDS_ARRAY_POWERSHELL[*]}"
-}
-
 AddOptionsToCommand() {
   local -n COMMAND_ARRAY_NAME="${1}"
   local COMMAND_OPTIONS_TO_ADD="${2}"
@@ -105,29 +93,24 @@ fi
 DOTNET_FORMAT_COMMAND=(dotnet format)
 
 LINTER_COMMANDS_ARRAY_ANSIBLE=(ansible-lint -c "${ANSIBLE_LINTER_RULES}")
-LINTER_COMMANDS_ARRAY_ARM=(pwsh -NoProfile -NoLogo -Command "\"Import-Module ${ARM_TTK_PSD1} ; \\\${config} = \\\$(Import-PowerShellDataFile -Path ${ARM_LINTER_RULES}) ; Test-AzTemplate @config -TemplatePath '{}'; if (\\\${Error}.Count) { exit 1 }\"")
+# This is a Powershell command. LintCodebase will take care of wrapping it in a Poweshell instance
+LINTER_COMMANDS_ARRAY_ARM=("Import-Module ${ARM_TTK_PSD1} ; \\\${config} = \\\$(Import-PowerShellDataFile -Path ${ARM_LINTER_RULES:-}) ; Test-AzTemplate @config -TemplatePath")
 LINTER_COMMANDS_ARRAY_BASH=(shellcheck --color --rcfile "${BASH_LINTER_RULES}")
 # This check and the BASH_SEVERITY variable are needed until Shellcheck supports
 # setting severity using its config file.
 # Ref: https://github.com/koalaman/shellcheck/issues/2178
-if [ -n "${BASH_SEVERITY}" ]; then
+if [ -n "${BASH_SEVERITY:-}" ]; then
   export BASH_SEVERITY
   LINTER_COMMANDS_ARRAY_BASH+=(--severity="${BASH_SEVERITY}")
 fi
 LINTER_COMMANDS_ARRAY_BASH_EXEC=(bash-exec '{}')
-if [ "${BASH_EXEC_IGNORE_LIBRARIES}" == 'true' ]; then
+if [ "${BASH_EXEC_IGNORE_LIBRARIES:-}" == 'true' ]; then
   debug "Enabling bash-exec option to ignore shell library files."
   LINTER_COMMANDS_ARRAY_BASH_EXEC+=('true')
 fi
+LINTER_COMMANDS_ARRAY_BIOME_FORMAT=(biome format --error-on-warnings --no-errors-on-unmatched)
+LINTER_COMMANDS_ARRAY_BIOME_LINT=(biome lint --error-on-warnings --no-errors-on-unmatched)
 LINTER_COMMANDS_ARRAY_CHECKOV=(checkov --config-file "${CHECKOV_LINTER_RULES}")
-if CheckovConfigurationFileContainsDirectoryOption "${CHECKOV_LINTER_RULES}"; then
-  # Consume the input as we do with ANSIBLE
-  debug "Consume the input of the Checkov command because we don't need to add it as an argument."
-  LINTER_COMMANDS_ARRAY_CHECKOV+=("&& echo \"Got the list of directories to lint from the configuration file: {}\"")
-else
-  debug "Adding the '--directory' option to the Checkov command."
-  LINTER_COMMANDS_ARRAY_CHECKOV+=(--directory)
-fi
 LINTER_COMMANDS_ARRAY_CLANG_FORMAT=(clang-format --style=file:"${CLANG_FORMAT_LINTER_RULES}" --Werror)
 LINTER_COMMANDS_ARRAY_CLOJURE=(clj-kondo --config "${CLOJURE_LINTER_RULES}" --lint)
 LINTER_COMMANDS_ARRAY_CLOUDFORMATION=(cfn-lint --config-file "${CLOUDFORMATION_LINTER_RULES}")
@@ -144,13 +127,14 @@ LINTER_COMMANDS_ARRAY_DOTNET_SLN_FORMAT_WHITESPACE=("${DOTNET_FORMAT_COMMAND[@]}
 LINTER_COMMANDS_ARRAY_EDITORCONFIG=(editorconfig-checker -config "${EDITORCONFIG_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_ENV=(dotenv-linter)
 LINTER_COMMANDS_ARRAY_GITHUB_ACTIONS=(actionlint -config-file "${GITHUB_ACTIONS_LINTER_RULES}")
-if [ "${GITHUB_ACTIONS_COMMAND_ARGS}" != "null" ] && [ -n "${GITHUB_ACTIONS_COMMAND_ARGS}" ]; then
+if [ "${GITHUB_ACTIONS_COMMAND_ARGS:-}" != "null" ] && [ -n "${GITHUB_ACTIONS_COMMAND_ARGS:-}" ]; then
   export GITHUB_ACTIONS_COMMAND_ARGS
   if ! AddOptionsToCommand "LINTER_COMMANDS_ARRAY_GITHUB_ACTIONS" "${GITHUB_ACTIONS_COMMAND_ARGS}"; then
     fatal "Error while adding options to GitHub Actions command"
   fi
 fi
-LINTER_COMMANDS_ARRAY_GITLEAKS=(gitleaks detect --no-banner --no-git --redact --config "${GITLEAKS_LINTER_RULES}" --verbose)
+LINTER_COMMANDS_ARRAY_GITHUB_ACTIONS_ZIZMOR=(zizmor --config "${GITHUB_ACTIONS_ZIZMOR_LINTER_RULES}")
+LINTER_COMMANDS_ARRAY_GITLEAKS=(gitleaks directory --no-banner --redact --config "${GITLEAKS_LINTER_RULES}" --verbose)
 if [ -n "${GITLEAKS_LOG_LEVEL:-}" ]; then
   export GITLEAKS_LOG_LEVEL
   LINTER_COMMANDS_ARRAY_GITLEAKS+=("${GITLEAKS_LOG_LEVEL_OPTIONS[@]}" "${GITLEAKS_LOG_LEVEL}")
@@ -162,8 +146,7 @@ if [ -n "${GITLEAKS_COMMAND_OPTIONS:-}" ]; then
     fatal "Error while adding options to GITLEAKS command"
   fi
 fi
-LINTER_COMMANDS_ARRAY_GITLEAKS+=(--source)
-LINTER_COMMANDS_ARRAY_GIT_COMMITLINT=(commitlint --verbose --cwd "{}")
+LINTER_COMMANDS_ARRAY_GIT_COMMITLINT=(commitlint --verbose)
 if [[ -n "${GITHUB_BEFORE_SHA:-}" ]]; then
   LINTER_COMMANDS_ARRAY_GIT_COMMITLINT+=(--from "${GITHUB_BEFORE_SHA}" --to "${GITHUB_SHA}")
 elif [[ "${ENABLE_COMMITLINT_EDIT_MODE}" == "true" ]]; then
@@ -174,6 +157,7 @@ fi
 if [ "${ENABLE_COMMITLINT_STRICT_MODE:-}" == 'true' ]; then
   LINTER_COMMANDS_ARRAY_GIT_COMMITLINT+=("${COMMITLINT_STRICT_MODE_OPTIONS[@]}")
 fi
+LINTER_COMMANDS_ARRAY_GIT_COMMITLINT+=("${COMMITLINT_CWD_OPTIONS[@]}")
 LINTER_COMMANDS_ARRAY_GIT_MERGE_CONFLICT_MARKERS=(git-merge-conflict-markers)
 LINTER_COMMANDS_ARRAY_GO=(golangci-lint run -c "${GO_LINTER_RULES}" --fast-only)
 LINTER_COMMANDS_ARRAY_GO_MODULES=(golangci-lint run --allow-parallel-runners -c "${GO_LINTER_RULES}")
@@ -201,38 +185,38 @@ fi
 LINTER_COMMANDS_ARRAY_JAVASCRIPT_ES=(eslint -c "${JAVASCRIPT_ES_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_JAVASCRIPT_PRETTIER=("${PRETTIER_COMMAND[@]}")
 LINTER_COMMANDS_ARRAY_JSCPD=(jscpd --config "${JSCPD_LINTER_RULES}")
-JSCPD_GITIGNORE_OPTION="--gitignore"
-if [[ "${IGNORE_GITIGNORED_FILES}" == "true" ]]; then
-  debug "IGNORE_GITIGNORED_FILES is ${IGNORE_GITIGNORED_FILES}. Enable Jscpd option to ignore files that Git ignores (${JSCPD_GITIGNORE_OPTION})"
-  # Users can also add the '"gitignore": true' option in their Jscpd config files to achieve the same functionality
-  # but we want to respect IGNORE_GITIGNORED_FILES
-  LINTER_COMMANDS_ARRAY_JSCPD+=("${JSCPD_GITIGNORE_OPTION}")
-fi
 LINTER_COMMANDS_ARRAY_JSON=(eslint -c "${JAVASCRIPT_ES_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_JSON_PRETTIER=("${PRETTIER_COMMAND[@]}")
 LINTER_COMMANDS_ARRAY_JSONC=(eslint -c "${JAVASCRIPT_ES_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_JSONC_PRETTIER=("${PRETTIER_COMMAND[@]}")
 LINTER_COMMANDS_ARRAY_JSX=(eslint -c "${JSX_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_JSX_PRETTIER=("${PRETTIER_COMMAND[@]}")
+LINTER_COMMANDS_ARRAY_KUBERNETES_KUBECONFORM=(kubeconform -strict)
+if [ -n "${KUBERNETES_KUBECONFORM_OPTIONS:-}" ]; then
+  export KUBERNETES_KUBECONFORM_OPTIONS
+  if ! AddOptionsToCommand "LINTER_COMMANDS_ARRAY_KUBERNETES_KUBECONFORM" "${KUBERNETES_KUBECONFORM_OPTIONS}"; then
+    fatal "Error while adding options to Kubeconform command"
+  fi
+fi
 LINTER_COMMANDS_ARRAY_KOTLIN=(ktlint "{/}")
 LINTER_COMMANDS_ARRAY_LATEX=(chktex -q -l "${LATEX_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_LUA=(luacheck --config "${LUA_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_MARKDOWN=(markdownlint -c "${MARKDOWN_LINTER_RULES}")
-if [ -n "${MARKDOWN_CUSTOM_RULE_GLOBS}" ]; then
+if [ -n "${MARKDOWN_CUSTOM_RULE_GLOBS:-}" ]; then
+  export MARKDOWN_CUSTOM_RULE_GLOBS
   IFS="," read -r -a MARKDOWN_CUSTOM_RULE_GLOBS_ARRAY <<<"${MARKDOWN_CUSTOM_RULE_GLOBS}"
+  if ! MARKDOWN_LINTER_RULES_DIR_PATH="$(dirname "${MARKDOWN_LINTER_RULES}")"; then
+    fatal "Error while initializing ${MARKDOWN_LINTER_RULES_DIR_PATH}"
+  fi
   for glob in "${MARKDOWN_CUSTOM_RULE_GLOBS_ARRAY[@]}"; do
-    if [ -z "${LINTER_RULES_PATH}" ]; then
-      LINTER_COMMANDS_ARRAY_MARKDOWN+=(-r "${GITHUB_WORKSPACE}/${glob}")
-    else
-      LINTER_COMMANDS_ARRAY_MARKDOWN+=(-r "${GITHUB_WORKSPACE}/${LINTER_RULES_PATH}/${glob}")
-    fi
+    LINTER_COMMANDS_ARRAY_MARKDOWN+=(-r "${MARKDOWN_LINTER_RULES_DIR_PATH}/${glob}")
   done
 fi
 LINTER_COMMANDS_ARRAY_MARKDOWN_PRETTIER=("${PRETTIER_COMMAND[@]}")
 LINTER_COMMANDS_ARRAY_NATURAL_LANGUAGE=(textlint -c "${NATURAL_LANGUAGE_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_OPENAPI=(spectral lint -r "${OPENAPI_LINTER_RULES}" -D)
 LINTER_COMMANDS_ARRAY_PERL=(perlcritic)
-if [ "${PERL_PERLCRITIC_OPTIONS}" != "null" ] && [ -n "${PERL_PERLCRITIC_OPTIONS}" ]; then
+if [ "${PERL_PERLCRITIC_OPTIONS:-}" != "null" ] && [ -n "${PERL_PERLCRITIC_OPTIONS:-}" ]; then
   export PERL_PERLCRITIC_OPTIONS
   if ! AddOptionsToCommand "LINTER_COMMANDS_ARRAY_PERL" "${PERL_PERLCRITIC_OPTIONS}"; then
     fatal "Error while adding options to Perlcritic command"
@@ -242,7 +226,20 @@ LINTER_COMMANDS_ARRAY_PHP_BUILTIN=(php -l -c "${PHP_BUILTIN_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_PHP_PHPCS=(phpcs --standard="${PHP_PHPCS_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_PHP_PHPSTAN=(phpstan analyse --no-progress --no-ansi --memory-limit 1G -c "${PHP_PHPSTAN_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_PHP_PSALM=(psalm --config="${PHP_PSALM_LINTER_RULES}")
-LINTER_COMMANDS_ARRAY_POWERSHELL=(Invoke-ScriptAnalyzer -EnableExit -Settings "${POWERSHELL_LINTER_RULES}" -Path '{}')
+# This is a Powershell command. LintCodebase will take care of wrapping it in a Poweshell instance
+LINTER_COMMANDS_ARRAY_POWERSHELL=(Invoke-ScriptAnalyzer -EnableExit -Settings "${POWERSHELL_LINTER_RULES:-}" -Path)
+LINTER_COMMANDS_ARRAY_PRE_COMMIT=(pre-commit run --config "${PRE_COMMIT_LINTER_RULES}")
+if [[ "${VALIDATE_ALL_CODEBASE:-"not set"}" == "false" ]] &&
+  [[ -n "${GITHUB_BEFORE_SHA:-}" ]]; then
+  LINTER_COMMANDS_ARRAY_PRE_COMMIT+=("${PRE_COMMIT_FROM_REF_OPTIONS[@]}" "${GITHUB_BEFORE_SHA}")
+  LINTER_COMMANDS_ARRAY_PRE_COMMIT+=("${PRE_COMMIT_TO_REF_OPTIONS[@]}" "${GITHUB_SHA}")
+else
+  LINTER_COMMANDS_ARRAY_PRE_COMMIT+=("${PRE_COMMIT_ALL_FILES_OPTION[@]}")
+fi
+if [ -n "${PRE_COMMIT_COMMAND_ARGS:-}" ]; then
+  export PRE_COMMIT_COMMAND_ARGS
+  AddOptionsToCommand "LINTER_COMMANDS_ARRAY_PRE_COMMIT" "${PRE_COMMIT_COMMAND_ARGS}"
+fi
 LINTER_COMMANDS_ARRAY_PROTOBUF=(protolint lint -config_path "${PROTOBUF_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_PYTHON_BLACK=(black --config "${PYTHON_BLACK_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_PYTHON_PYLINT=(pylint --rcfile "${PYTHON_PYLINT_LINTER_RULES}")
@@ -250,12 +247,14 @@ LINTER_COMMANDS_ARRAY_PYTHON_FLAKE8=(flake8 --config="${PYTHON_FLAKE8_LINTER_RUL
 LINTER_COMMANDS_ARRAY_PYTHON_ISORT=(isort --sp "${PYTHON_ISORT_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_PYTHON_MYPY=(mypy --config-file "${PYTHON_MYPY_LINTER_RULES}" --install-types --non-interactive)
 LINTER_COMMANDS_ARRAY_PYTHON_RUFF=(ruff check --config "${PYTHON_RUFF_LINTER_RULES}")
+LINTER_COMMANDS_ARRAY_PYTHON_RUFF_FORMAT=(ruff format --config "${PYTHON_RUFF_FORMAT_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_R=(R --slave -e "\"lints <- lintr::lint('{}');print(lints);errors <- purrr::keep(lints, ~ .\\\$type == 'error');quit(save = 'no', status = if (length(errors) > 0) 1 else 0)\"")
 LINTER_COMMANDS_ARRAY_RENOVATE=(renovate-config-validator --strict)
 LINTER_COMMANDS_ARRAY_RUBY=(rubocop -c "${RUBY_LINTER_RULES}" --force-exclusion --ignore-unrecognized-cops)
 LINTER_COMMANDS_ARRAY_RUST_2015=(rustfmt --edition 2015)
 LINTER_COMMANDS_ARRAY_RUST_2018=(rustfmt --edition 2018)
 LINTER_COMMANDS_ARRAY_RUST_2021=(rustfmt --edition 2021)
+LINTER_COMMANDS_ARRAY_RUST_2024=(rustfmt --edition 2024)
 LINTER_COMMANDS_ARRAY_RUST_CLIPPY=(cargo clippy)
 if [ -n "${RUST_CLIPPY_COMMAND_OPTIONS:-}" ]; then
   export RUST_CLIPPY_COMMAND_OPTIONS
@@ -264,15 +263,15 @@ if [ -n "${RUST_CLIPPY_COMMAND_OPTIONS:-}" ]; then
   fi
 fi
 LINTER_COMMANDS_ARRAY_SCALAFMT=(scalafmt --config "${SCALAFMT_LINTER_RULES}")
-LINTER_COMMANDS_ARRAY_SHELL_SHFMT=(shfmt)
+LINTER_COMMANDS_ARRAY_SHELL_SHFMT=(shfmt "${SHFMT_OPTIONS[@]}")
 LINTER_COMMANDS_ARRAY_SNAKEMAKE_LINT=(snakemake --lint -s)
 LINTER_COMMANDS_ARRAY_SNAKEMAKE_SNAKEFMT=(snakefmt --config "${SNAKEMAKE_SNAKEFMT_LINTER_RULES}")
+LINTER_COMMANDS_ARRAY_SPELL_CODESPELL=(codespell --config "${SPELL_CODESPELL_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_STATES=(asl-validator --json-path)
 LINTER_COMMANDS_ARRAY_SQLFLUFF=(sqlfluff)
 LINTER_COMMANDS_ARRAY_TERRAFORM_FMT=(terraform fmt)
 LINTER_COMMANDS_ARRAY_TERRAFORM_TFLINT=("TF_DATA_DIR=\"/tmp/.terraform-TERRAFORM_TFLINT-{//}\"" tflint -c "${TERRAFORM_TFLINT_LINTER_RULES}" "--filter=\"{/}\"")
-LINTER_COMMANDS_ARRAY_TERRAFORM_TERRASCAN=(terrascan scan -i terraform -t all -c "${TERRAFORM_TERRASCAN_LINTER_RULES}" -f)
-LINTER_COMMANDS_ARRAY_TERRAGRUNT=(terragrunt hclfmt --terragrunt-check --terragrunt-log-level error --terragrunt-hclfmt-file)
+LINTER_COMMANDS_ARRAY_TERRAGRUNT=(terragrunt hcl format --check --log-level error --file)
 LINTER_COMMANDS_ARRAY_TRIVY=(trivy filesystem --config "${TRIVY_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_TSX=(eslint -c "${TSX_LINTER_RULES}")
 LINTER_COMMANDS_ARRAY_TYPESCRIPT_ES=(eslint -c "${TYPESCRIPT_ES_LINTER_RULES}")
@@ -286,18 +285,8 @@ if [[ "${LOG_DEBUG}" == "false" ]]; then
   LINTER_COMMANDS_ARRAY_XML+=("${XMLLINT_NOOUT_OPTIONS[@]}")
 fi
 LINTER_COMMANDS_ARRAY_YAML=(yamllint -c "${YAML_LINTER_RULES}" -f parsable)
-if [ "${YAML_ERROR_ON_WARNING}" == 'true' ]; then
+if [ "${YAML_ERROR_ON_WARNING:-}" == 'true' ]; then
+  export YAML_ERROR_ON_WARNING
   LINTER_COMMANDS_ARRAY_YAML+=(--strict)
 fi
 LINTER_COMMANDS_ARRAY_YAML_PRETTIER=("${PRETTIER_COMMAND[@]}")
-
-# Add nbQA commands after defining PYTHON commands so we can reuse them
-# The format is: nbqa <code quality tool> <notebook or directory> <nbqa options> <code quality tool arguments>
-# Reuse the commands we defined above for Python tools to avoid duplication
-LINTER_COMMANDS_ARRAY_JUPYTER_NBQA_BLACK=("${NBQA_EXECUTABLE_NAME[@]}" "${LINTER_COMMANDS_ARRAY_PYTHON_BLACK[0]}" "{}" "${NBQA_SHELL_OPTION[@]}" "${LINTER_COMMANDS_ARRAY_PYTHON_BLACK[@]:1}")
-LINTER_COMMANDS_ARRAY_JUPYTER_NBQA_FLAKE8=("${NBQA_EXECUTABLE_NAME[@]}" "${LINTER_COMMANDS_ARRAY_PYTHON_FLAKE8[0]}" "{}" "${NBQA_SHELL_OPTION[@]}" "${LINTER_COMMANDS_ARRAY_PYTHON_FLAKE8[@]:1}")
-LINTER_COMMANDS_ARRAY_JUPYTER_NBQA_ISORT=("${NBQA_EXECUTABLE_NAME[@]}" "${LINTER_COMMANDS_ARRAY_PYTHON_ISORT[0]}" "{}" "${NBQA_SHELL_OPTION[@]}" "${LINTER_COMMANDS_ARRAY_PYTHON_ISORT[@]:1}")
-LINTER_COMMANDS_ARRAY_JUPYTER_NBQA_MYPY=("${NBQA_EXECUTABLE_NAME[@]}" "${LINTER_COMMANDS_ARRAY_PYTHON_MYPY[0]}" "{}" "${NBQA_SHELL_OPTION[@]}" "${LINTER_COMMANDS_ARRAY_PYTHON_MYPY[@]:1}")
-LINTER_COMMANDS_ARRAY_JUPYTER_NBQA_PYLINT=("${NBQA_EXECUTABLE_NAME[@]}" "${LINTER_COMMANDS_ARRAY_PYTHON_PYLINT[0]}" "{}" "${NBQA_SHELL_OPTION[@]}" "${LINTER_COMMANDS_ARRAY_PYTHON_PYLINT[@]:1}")
-# Strip the "check" subcommand because nbqa adds it already
-LINTER_COMMANDS_ARRAY_JUPYTER_NBQA_RUFF=("${NBQA_EXECUTABLE_NAME[@]}" "${LINTER_COMMANDS_ARRAY_PYTHON_RUFF[0]}" "{}" "${NBQA_SHELL_OPTION[@]}" "${LINTER_COMMANDS_ARRAY_PYTHON_RUFF[@]:2}")

@@ -32,7 +32,7 @@ body:
           required: true
   - type: checkboxes
     attributes:
-      label: Are you resonably sure that it's a Super-linter issue, and not an issue related to a tool that Super-linter runs?
+      label: Are you reasonably sure that it's a Super-linter issue, and not an issue related to a tool that Super-linter runs?
       description: |
         If you encounter a specific issue, ensure that the issue is about
         Super-linter, and not about a tool that Super-linter runs. For example,
@@ -94,7 +94,10 @@ body:
         Copy and paste any relevant log output.
         This will be automatically formatted into code, so no need for backticks.
         Enable debug logging, either on GitHub Actions, or when running locally.
-        Not attaching debug logging will delay the issue triaging process.
+        Not attaching debug logging will delay the issue triaging process. For
+        more information about how to enable debug logging when running
+        Super-linter on GitHub Actions, see
+        https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs
       render: shell
     validations:
       required: true

@@ -3,8 +3,58 @@
 .PHONY: all
 all: info docker test ## Run all targets.
 
-.PHONY: test
-test: info validate-container-image-labels docker-build-check docker-dev-container-build-check npm-audit test-lib inspec lint-codebase fix-codebase test-default-config-files test-actions-runner-debug test-actions-steps-debug test-runner-debug test-find lint-subset-files test-custom-ssl-cert test-non-default-workdir test-git-flags test-non-default-home-directory test-git-initial-commit test-git-merge-commit-push test-git-merge-commit-push-tag test-log-level test-use-find-and-ignore-gitignored-files test-linters-expect-failure-log-level-notice test-bash-exec-library-expect-success test-bash-exec-library-expect-failure test-save-super-linter-output test-save-super-linter-output-custom-path test-save-super-linter-custom-summary test-custom-gitleaks-log-level test-dont-save-super-linter-log-file test-dont-save-super-linter-output test-linter-command-options test-github-push-event-multiple-commits test-github-merge-group-event test-runtime-dependencies-installation test-linters test-linters-fix-mode ## Run the test suite
+.PHONY: test ## Run the test suite
+test: \
+	info \
+	validate-container-image-labels \
+	docker-build-check \
+	docker-dev-container-build-check \
+	test-lib \
+	inspec \
+	lint-codebase \
+	fix-codebase \
+	lint-subset-files \
+	test-non-default-home-directory \
+	test-save-super-linter-output \
+	test-save-super-linter-output-custom-path \
+	test-save-super-linter-custom-summary \
+	test-dont-save-super-linter-log-file \
+	test-dont-save-super-linter-output \
+	test-git-invalid-worktree \
+	test-git-valid-worktree \
+	test-github-event-initial-commit \
+	test-github-event-merge-commit-push-default-branch \
+	test-github-event-merge-commit-push-tag \
+	test-github-event-merge-group \
+	test-github-event-repository-dispatch \
+	test-github-event-pr-event-multiple-commits \
+	test-github-event-push-event-multiple-commits-default-branch \
+	test-github-event-push-event-multiple-commits-use-find-algorithm-and-ignore-gitignored-files-default-branch \
+	test-github-event-push-event-multiple-commits-use-find-algorithm-default-branch \
+	test-github-event-push-initial-commit-multiple-commits \
+	test-github-event-push-force-push \
+	test-github-event-push-force-push-multiple-commits \
+	test-runtime-dependencies-installation \
+	test-linters-bash-exec-ignore-libraries-expect-failure \
+	test-linters-bash-exec-ignore-libraries-expect-success \
+	test-linters-expect-failure \
+	test-linters-expect-failure-log-level-notice \
+	test-linters-expect-failure-suppress-output-on-success \
+	test-linters-expect-failure-suppress-output-on-success-log-level-notice \
+	test-linters-expect-success \
+	test-linters-expect-success-log-level-notice \
+	test-linters-expect-success-suppress-output-on-success \
+	test-linters-expect-success-suppress-output-on-success-log-level-notice \
+	test-linters-fix-mode
+
+.PHONY: audit ## Run dependency audits
+audit: \
+	composer-audit \
+	npm-audit \
+	pip-audit \
+	trivy
+
+SHELL := /bin/bash
 
 # if this session isn't interactive, then we don't want to allocate a
 # TTY, which would fail, but if it is interactive, we do want to attach
@@ -16,7 +66,8 @@ endif
 
 .PHONY: help
 help: ## Show help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
+	@grep -E ':.*?##(.*)$$' $(MAKEFILE_LIST) | grep -v 'MAKEFILE_LIST' | sed -E 's/^\.PHONY: *([a-zA-Z_-]+) */\1:/' | sort | awk 'BEGIN {FS = ":.*?## "; max_len = 0}; { f1[NR] = $$1; f2[NR] = $$2; if (length($$1) > max_len) { max_len = length($$1) } } END { padding = max_len + 1; for (i = 1; i <= NR; i++) { printf("\033[36m%-" padding "s\033[0m %s\n", f1[i], f2[i]) } }'
+
 
 .PHONY: inspec-check
 inspec-check: ## Validate inspec profiles
@@ -42,21 +93,11 @@ ifeq ($(IMAGE),slim)
 IMAGE_PREFIX := slim-
 endif
 
-# Default to latest
 ifeq ($(SUPER_LINTER_TEST_CONTAINER_URL),)
+# Default to the latest tag
 SUPER_LINTER_TEST_CONTAINER_URL := "ghcr.io/super-linter/super-linter:${IMAGE_PREFIX}latest"
-endif
-
-ifeq ($(BUILD_DATE),)
-BUILD_DATE := $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
-endif
-
-ifeq ($(BUILD_REVISION),)
-BUILD_REVISION := $(shell git rev-parse HEAD)
-endif
-
-ifeq ($(BUILD_VERSION),)
-BUILD_VERSION := $(shell git rev-parse HEAD)
+else
+SUPER_LINTER_TEST_CONTAINER_URL := ${CONTAINER_IMAGE_ID}
 endif
 
 GITHUB_TOKEN_PATH := "$(CURDIR)/.github-personal-access-token"
@@ -75,16 +116,15 @@ endif
 
 .PHONY: info
 info: ## Gather information about the runtime environment
+	set -o errexit; \
+	. scripts/build-metadata.sh; \
 	echo "whoami: $$(whoami)"; \
 	echo "pwd: $$(pwd)"; \
 	echo "IMAGE:" $(IMAGE); \
 	echo "IMAGE_PREFIX: $(IMAGE_PREFIX)"; \
-	echo "Build date: ${BUILD_DATE}"; \
-	echo "Build revision: ${BUILD_REVISION}"; \
-	echo "Build version: ${BUILD_VERSION}"; \
+	echo "Container image ID: ${CONTAINER_IMAGE_ID}"; \
 	echo "SUPER_LINTER_TEST_CONTAINER_URL: $(SUPER_LINTER_TEST_CONTAINER_URL)"; \
 	echo "ls -ahl:\n$$(ls -ahl)"; \
-	echo "Git log:\n$$(git log --all --graph --abbrev-commit --decorate --format=oneline)" \
 	docker images; \
 	docker ps; \
 	echo "Container image layers size:"; \
@@ -95,9 +135,23 @@ info: ## Gather information about the runtime environment
 		$(SUPER_LINTER_TEST_CONTAINER_URL) \
 		| sort --human
 
-.PHONY: check-github-token
-check-github-token:
+.PHONY: check-github-token-file
+check-github-token-file:
 	@if [ ! -f "${GITHUB_TOKEN_PATH}" ]; then echo "Cannot find the file to load the GitHub access token: $(GITHUB_TOKEN_PATH). Create a readable file there, and populate it with a GitHub personal access token."; exit 1; fi
+
+.PHONY: check-github-token
+check-github-token: check-github-token-file
+	@if ! curl \
+		--fail \
+		-o /dev/null \
+		--silent \
+		-H "Authorization: Bearer $(shell cat "${GITHUB_TOKEN_PATH}")" \
+	https://api.github.com/rate_limit; then \
+		echo "GitHub token not valid or might be expired"; \
+		exit 1; \
+	else \
+		echo "GitHub token successfully validated"; \
+	fi
 
 .PHONY: inspec
 inspec: inspec-check ## Run InSpec tests
@@ -121,10 +175,12 @@ inspec: inspec-check ## Run InSpec tests
 
 .PHONY: docker
 docker: docker-build-check check-github-token ## Build the container image
+	set -o errexit; \
+	. scripts/build-metadata.sh; \
 	DOCKER_BUILDKIT=1 docker buildx build --load \
-		--build-arg BUILD_DATE=$(BUILD_DATE) \
-		--build-arg BUILD_REVISION=$(BUILD_REVISION) \
-		--build-arg BUILD_VERSION=$(BUILD_VERSION) \
+		--build-arg BUILD_DATE=$${BUILD_DATE} \
+		--build-arg BUILD_REVISION=$${BUILD_REVISION} \
+		--build-arg BUILD_VERSION=$${BUILD_VERSION} \
 		--cache-from type=registry,ref=ghcr.io/super-linter/super-linter:${IMAGE_PREFIX}latest-buildcache \
 		--cache-from type=registry,ref=ghcr.io/super-linter/super-linter:latest-buildcache-base_image \
 		--cache-from type=registry,ref=ghcr.io/super-linter/super-linter:latest-buildcache-clang-format \
@@ -148,30 +204,50 @@ docker-build-check:
 docker-pull: ## Pull the container image from registry
 	docker pull $(SUPER_LINTER_TEST_CONTAINER_URL)
 
+SUPER_LINTER_CONTAINER_RUN := docker run $(DOCKER_FLAGS) \
+	--rm \
+	-v "$(CURDIR)":/tmp/lint \
+	-v "$(CURDIR)/dependencies/Gemfile.lock":/Gemfile.lock \
+	-v "$(CURDIR)/dependencies/Gemfile":/Gemfile \
+	-v "$(CURDIR)/dependencies/package-lock.json":/package-lock.json \
+	-v "$(CURDIR)/dependencies/package.json":/package.json \
+	-v "$(CURDIR)/dependencies/composer/composer.json":/php-composer/composer.json \
+	-v "$(CURDIR)/dependencies/composer/composer.lock":/php-composer/composer.lock \
+	-v "$(CURDIR)/scripts/bash-exec.sh":/usr/bin/bash-exec \
+	-v "$(CURDIR)/scripts/git-merge-conflict-markers.sh":/usr/bin/git-merge-conflict-markers \
+	-w /tmp/lint \
+	-e IMAGE=$(IMAGE) \
+	-e VERSION_FILE=/tmp/linterVersions.txt
+
 .PHONY: open-shell-super-linter-container
 open-shell-super-linter-container: ## Open a shell in the Super-linter container
-	docker run $(DOCKER_FLAGS) \
-		--interactive \
-		--entrypoint /bin/bash \
-		--rm \
-		-v "$(CURDIR)":/tmp/lint \
-		-v "$(CURDIR)/dependencies/Gemfile.lock":/Gemfile.lock \
-		-v "$(CURDIR)/dependencies/Gemfile":/Gemfile \
-		-v "$(CURDIR)/dependencies/package-lock.json":/package-lock.json \
-		-v "$(CURDIR)/dependencies/package.json":/package.json \
-		-v "$(CURDIR)/dependencies/composer/composer.json":/php-composer/composer.json \
-		-v "$(CURDIR)/dependencies/composer/composer.lock":/php-composer/composer.lock \
-		-v "$(CURDIR)/scripts/bash-exec.sh":/usr/bin/bash-exec \
-		-v "$(CURDIR)/scripts/git-merge-conflict-markers.sh":/usr/bin/git-merge-conflict-markers \
-		$(SUPER_LINTER_TEST_CONTAINER_URL)
+	$(SUPER_LINTER_CONTAINER_RUN) --interactive --entrypoint /bin/bash $(SUPER_LINTER_TEST_CONTAINER_URL)
+
+.PHONY: run-command-super-linter-container
+run-command-super-linter-container: ## Run a one-off command in the Super-linter container. Use CMD="your command"
+	@if [ -z "$(CMD)" ]; then echo "Error: CMD parameter is required. Example: make run-command-super-linter-container CMD=\"ls -alh\""; exit 1; fi
+	$(SUPER_LINTER_CONTAINER_RUN) --entrypoint /bin/bash $(SUPER_LINTER_TEST_CONTAINER_URL) -c "$(CMD)"
 
 .PHONY: validate-container-image-labels
 validate-container-image-labels: ## Validate container image labels
+	set -o errexit; \
+	. scripts/build-metadata.sh; \
 	$(CURDIR)/test/validate-docker-labels.sh \
 		$(SUPER_LINTER_TEST_CONTAINER_URL) \
-		$(BUILD_DATE) \
-		$(BUILD_REVISION) \
-		$(BUILD_VERSION)
+		$${BUILD_DATE} \
+		$${BUILD_REVISION} \
+		$${BUILD_VERSION}
+
+.PHONY: composer-audit
+composer-audit: ## Run composer audit to check for known vulnerable dependencies
+	docker run $(DOCKER_FLAGS) \
+		--entrypoint /bin/bash \
+		--rm \
+		-v "$(CURDIR)/dependencies/composer/composer.json":/php-composer/composer.json \
+		-v "$(CURDIR)/dependencies/composer/composer.lock":/php-composer/composer.lock \
+		--workdir /php-composer \
+		$(SUPER_LINTER_TEST_CONTAINER_URL) \
+		-c "composer audit"
 
 .PHONY: npm-audit
 npm-audit: ## Run npm audit to check for known vulnerable dependencies
@@ -184,140 +260,67 @@ npm-audit: ## Run npm audit to check for known vulnerable dependencies
 		$(SUPER_LINTER_TEST_CONTAINER_URL) \
 		-c "npm audit"
 
-# For some cases, mount a directory that doesn't have too many files to keep tests short
-
-.PHONY: test-actions-runner-debug
-test-actions-runner-debug: ## Run super-linter with ACTIONS_RUNNER_DEBUG=true
-	docker run \
-		-e ACTIONS_RUNNER_DEBUG=true \
-		-e RUN_LOCAL=true \
-		-e ENABLE_GITHUB_ACTIONS_GROUP_TITLE=true \
-		-e DEFAULT_BRANCH=main \
-		-e USE_FIND_ALGORITHM=true \
-		-e VALIDATE_GIT_COMMITLINT=false \
-		-v "$(CURDIR)/.github":/tmp/lint/.github \
+.PHONY: pip-audit
+pip-audit:  ## Run pip-audit to check for known vulnerable dependencies
+	docker run $(DOCKER_FLAGS) \
+		--entrypoint /run-pip-audit.sh \
 		--rm \
+		-v "$(CURDIR)/scripts/run-pip-audit.sh":/run-pip-audit.sh \
+		--workdir / \
 		$(SUPER_LINTER_TEST_CONTAINER_URL)
 
-.PHONY: test-actions-steps-debug
-test-actions-steps-debug: ## Run super-linter with ACTIONS_STEPS_DEBUG=true
+.PHONY: trivy
+trivy: ## Run trivy to check for known vulnerable dependencies
 	docker run \
-		-e ACTIONS_STEPS_DEBUG=true \
 		-e RUN_LOCAL=true \
-		-e ENABLE_GITHUB_ACTIONS_GROUP_TITLE=true \
-		-e DEFAULT_BRANCH=main \
+		-e SAVE_SUPER_LINTER_SUMMARY=true \
 		-e USE_FIND_ALGORITHM=true \
-		-e VALIDATE_GIT_COMMITLINT=false \
-		-v "$(CURDIR)/.github":/tmp/lint/.github \
-		--rm \
-		$(SUPER_LINTER_TEST_CONTAINER_URL)
-
-.PHONY: test-runner-debug
-test-runner-debug: ## Run super-linter with RUNNER_DEBUG=1
-	docker run \
-		-e RUNNER_DEBUG=1 \
-		-e RUN_LOCAL=true \
-		-e ENABLE_GITHUB_ACTIONS_GROUP_TITLE=true \
-		-e DEFAULT_BRANCH=main \
-		-e USE_FIND_ALGORITHM=true \
-		-e VALIDATE_GIT_COMMITLINT=false \
-		-v "$(CURDIR)/.github":/tmp/lint/.github \
-		--rm \
-		$(SUPER_LINTER_TEST_CONTAINER_URL)
-
-.PHONY: test-find
-test-find: ## Run super-linter on a subdirectory with USE_FIND_ALGORITHM=true
-	docker run \
-		-e RUN_LOCAL=true \
-		-e LOG_LEVEL=DEBUG \
-		-e ENABLE_GITHUB_ACTIONS_GROUP_TITLE=true \
-		-e DEFAULT_BRANCH=main \
-		-e USE_FIND_ALGORITHM=true \
-		-e VALIDATE_GIT_COMMITLINT=false \
-		-v "$(CURDIR)/.github":/tmp/lint/.github \
-		--rm \
-		$(SUPER_LINTER_TEST_CONTAINER_URL)
-
-# We need to set USE_FIND_ALGORITHM=true because the DEFALUT_WORKSPACE is not
-# a Git directory in this test case
-.PHONY: test-non-default-workdir
-test-non-default-workdir: ## Run super-linter with DEFAULT_WORKSPACE set
-	docker run \
-		-e RUN_LOCAL=true \
-		-e LOG_LEVEL=DEBUG \
-		-e ENABLE_GITHUB_ACTIONS_GROUP_TITLE=true \
-		-e DEFAULT_BRANCH=main \
-		-e DEFAULT_WORKSPACE=/tmp/not-default-workspace \
-		-e USE_FIND_ALGORITHM=true \
-		-e VALIDATE_ALL_CODEBASE=true \
-		-e VALIDATE_GIT_COMMITLINT=false \
-		-v $(CURDIR)/.github:/tmp/not-default-workspace/.github \
-		--rm \
-		$(SUPER_LINTER_TEST_CONTAINER_URL)
-
-.PHONY: test-git-flags
-test-git-flags: ## Run super-linter with different git-related flags
-	docker run \
-		-e RUN_LOCAL=true \
-		-e LOG_LEVEL=DEBUG \
-		-e ENABLE_GITHUB_ACTIONS_GROUP_TITLE=true \
-		-e FILTER_REGEX_EXCLUDE=".*(/test/linters/|CHANGELOG.md|/test/data/test-repository-contents/).*" \
-		-e DEFAULT_BRANCH=main \
-		-e IGNORE_GENERATED_FILES=true \
-		-e IGNORE_GITIGNORED_FILES=true \
-		-e VALIDATE_ALL_CODEBASE=true \
-		-v "$(CURDIR)":/tmp/lint \
+		-e VALIDATE_TRIVY=true \
+		-v "$(CURDIR):/tmp/lint" \
 		--rm \
 		$(SUPER_LINTER_TEST_CONTAINER_URL)
 
 .PHONY: lint-codebase
 lint-codebase: ## Lint the entire codebase
-	docker run $(DOCKER_FLAGS) \
-		-e CREATE_LOG_FILE=true \
-		-e RUN_LOCAL=true \
-		-e LOG_LEVEL=DEBUG \
-		-e DEFAULT_BRANCH=main \
-		-e ENABLE_GITHUB_ACTIONS_GROUP_TITLE=true \
-		-e FILTER_REGEX_EXCLUDE=".*(/test/linters/|CHANGELOG.md|/test/data/test-repository-contents/).*" \
-		-e GITLEAKS_CONFIG_FILE=".gitleaks-ignore-tests.toml" \
-		-e RENOVATE_SHAREABLE_CONFIG_PRESET_FILE_NAMES="default.json,hoge.json" \
-		-e SAVE_SUPER_LINTER_OUTPUT=true \
-		-e SAVE_SUPER_LINTER_SUMMARY=true \
-		-e VALIDATE_ALL_CODEBASE=true \
-		-v "$(CURDIR):/tmp/lint" \
-		--rm \
-		$(SUPER_LINTER_TEST_CONTAINER_URL)
+	$(CURDIR)/test/run-super-linter-tests.sh \
+		$(SUPER_LINTER_TEST_CONTAINER_URL) \
+		"lint_codebase" \
+		"$(IMAGE)"
 
 # Return an error if there are changes to commit
 .PHONY: fix-codebase
 fix-codebase: ## Fix and format the entire codebase
-	docker run $(DOCKER_FLAGS) \
-		-e CREATE_LOG_FILE=true \
-		-e DEFAULT_BRANCH=main \
-		-e ENABLE_GITHUB_ACTIONS_GROUP_TITLE=true \
-		-e FILTER_REGEX_EXCLUDE=".*(/test/linters/|CHANGELOG.md|/test/data/test-repository-contents/).*" \
-		-e FIX_ENV=true \
-		-e FIX_JAVASCRIPT_ES=true \
-		-e FIX_JAVASCRIPT_PRETTIER=true \
-		-e FIX_JSON=true \
-		-e FIX_JSON_PRETTIER=true \
-		-e FIX_MARKDOWN=true \
-		-e FIX_MARKDOWN_PRETTIER=true \
-		-e FIX_NATURAL_LANGUAGE=true \
-		-e FIX_RUBY=true \
-		-e FIX_SHELL_SHFMT=true \
-		-e FIX_YAML_PRETTIER=true \
-		-e GITLEAKS_CONFIG_FILE=".gitleaks-ignore-tests.toml" \
-		-e LOG_LEVEL=DEBUG \
-		-e RUN_LOCAL=true \
-		-e SAVE_SUPER_LINTER_OUTPUT=true \
-		-e SAVE_SUPER_LINTER_SUMMARY=true \
-		-e VALIDATE_ALL_CODEBASE=true \
-		-v "$(CURDIR):/tmp/lint" \
-		--rm \
+	$(CURDIR)/test/run-super-linter-tests.sh \
 		$(SUPER_LINTER_TEST_CONTAINER_URL) \
-	&& /bin/bash -c "source test/testUtils.sh; if ! CheckUnexpectedGitChanges ${CURDIR}; then exit 1; fi"
+		"fix_codebase" \
+		"$(IMAGE)"
 
+.PHONY: format-codebase ## Format the codebase
+format-codebase: \
+	format-prettier \
+	format-shfmt
+
+FILES_TO_FORMAT ?= .
+
+.PHONY: format-prettier
+format-prettier: ## Run prettier to format the codebase
+	docker run $(DOCKER_FLAGS) \
+		--entrypoint /bin/bash \
+		--rm \
+		-v "$(CURDIR):/tmp/lint" \
+		--workdir "/tmp/lint" \
+		$(SUPER_LINTER_TEST_CONTAINER_URL) \
+		-c "prettier --write $(FILES_TO_FORMAT) '!test/linters/**/*bad*' '!test/linters/**/*bad*/**'"
+
+.PHONY: format-shfmt
+format-shfmt: ## Run shfmt to format shell scripts in the codebase
+	docker run $(DOCKER_FLAGS) \
+		--entrypoint /bin/bash \
+		--rm \
+		-v "$(CURDIR):/tmp/lint" \
+		--workdir "/tmp/lint" \
+		$(SUPER_LINTER_TEST_CONTAINER_URL) \
+		-c "shfmt --write $(FILES_TO_FORMAT)"
 
 # This is a smoke test to check how much time it takes to lint only a small
 # subset of files, compared to linting the whole codebase.
@@ -349,6 +352,7 @@ lint-subset-files-enable-expensive-io-checks: ## Lint a small subset of files in
 		-e VALIDATE_ALL_CODEBASE=true \
 		-e VALIDATE_ARM=true \
 		-e VALIDATE_CLOUDFORMATION=true \
+		-e VALIDATE_KUBERNETES_KUBECONFORM=true \
 		-e VALIDATE_MARKDOWN=true \
 		-e VALIDATE_OPENAPI=true \
 		-e VALIDATE_STATES=true \
@@ -356,8 +360,30 @@ lint-subset-files-enable-expensive-io-checks: ## Lint a small subset of files in
 		--rm \
 		$(SUPER_LINTER_TEST_CONTAINER_URL)
 
-.PHONY: test-lib
-test-lib: test-globals-languages test-linter-rules test-build-file-list test-detect-files test-github-event test-setup-ssh test-validation test-output test-linter-commands test-linter-versions ## Test super-linter libs and globals
+.PHONY: test-lib ## Test super-linter libs and globals
+test-lib: \
+	test-log \
+	test-globals-languages \
+	test-linter-rules \
+	test-build-file-list \
+	test-detect-files \
+	test-github-event \
+	test-setup-ssh \
+	test-validation \
+	test-output \
+	test-linter-commands \
+	test-linter-versions \
+	test-update-ssl \
+	test-bash-exec
+
+.PHONY: test-log
+test-log: ## Test log initialization and functions
+	docker run \
+		-v "$(CURDIR):/tmp/lint" \
+		-w /tmp/lint \
+		--entrypoint /tmp/lint/test/lib/logTest.sh \
+		--rm \
+		$(SUPER_LINTER_TEST_CONTAINER_URL)
 
 .PHONY: test-globals-languages
 test-globals-languages: ## Test globals/languages.sh
@@ -459,8 +485,27 @@ test-linter-versions: ## Test linterVersions
 		--rm \
 		$(SUPER_LINTER_TEST_CONTAINER_URL)
 
-.PHONY: test-runtime-dependencies-installation
-test-runtime-dependencies-installation: test-os-packages-installation ## Test runtime dependencies installation
+.PHONY: test-update-ssl
+test-update-ssl: ## Test updateSSL
+	docker run \
+		-v "$(CURDIR):/tmp/lint" \
+		-w /tmp/lint \
+		--entrypoint /tmp/lint/test/lib/updateSSLTest.sh \
+		--rm \
+		$(SUPER_LINTER_TEST_CONTAINER_URL)
+
+.PHONY: test-bash-exec
+test-bash-exec: ## Test bash-exec
+	docker run \
+		-v "$(CURDIR):/tmp/lint" \
+		-w /tmp/lint \
+		--entrypoint /tmp/lint/test/lib/bashExecTest.sh \
+		--rm \
+		$(SUPER_LINTER_TEST_CONTAINER_URL)
+
+.PHONY: test-runtime-dependencies-installation ## Test runtime dependencies installation
+test-runtime-dependencies-installation: \
+	test-os-packages-installation
 
 .PHONY: test-os-packages-installation
 test-os-packages-installation: ## Test installing OS packages
@@ -468,37 +513,6 @@ test-os-packages-installation: ## Test installing OS packages
 		-v "$(CURDIR):/tmp/lint" \
 		-w /tmp/lint \
 		--entrypoint /tmp/lint/test/lib/osPackagesInstallationTest.sh \
-		--rm \
-		$(SUPER_LINTER_TEST_CONTAINER_URL)
-
-# Run this test against a small directory because we're only interested in
-# loading default configuration files. The directory that we run super-linter
-# against should not be .github because that includes default linter rules.
-# Disable commitlint because the workspace is not a Git repository.
-.PHONY: test-default-config-files
-test-default-config-files: ## Test default configuration files loading
-	docker run \
-		-e RUN_LOCAL=true \
-		-e LOG_LEVEL=DEBUG \
-		-e ENABLE_GITHUB_ACTIONS_GROUP_TITLE=true \
-		-e DEFAULT_BRANCH=main \
-		-e USE_FIND_ALGORITHM=true \
-		-e VALIDATE_GIT_COMMITLINT=false \
-		-v "$(CURDIR)/docs":/tmp/lint \
-		--rm \
-		$(SUPER_LINTER_TEST_CONTAINER_URL)
-
-.PHONY: test-custom-ssl-cert
-test-custom-ssl-cert: ## Test the configuration of a custom SSL/TLS certificate
-	docker run \
-		-e RUN_LOCAL=true \
-		-e LOG_LEVEL=DEBUG \
-		-e ENABLE_GITHUB_ACTIONS_GROUP_TITLE=true \
-		-e DEFAULT_BRANCH=main \
-		-e USE_FIND_ALGORITHM=true \
-		-e SSL_CERT_SECRET="$(shell cat test/data/ssl-certificate/rootCA-test.crt)" \
-		-e VALIDATE_GIT_COMMITLINT=false \
-		-v "$(CURDIR)/docs":/tmp/lint \
 		--rm \
 		$(SUPER_LINTER_TEST_CONTAINER_URL)
 
@@ -516,14 +530,25 @@ test-linters-fix-mode: ## Run the linters test suite (fix mode)
 		"run_test_case_fix_mode" \
 		"$(IMAGE)"
 
-.PHONY: test-linters
-test-linters: test-linters-expect-success test-linters-expect-failure ## Run the linters test suite
-
 .PHONY: test-linters-expect-success
 test-linters-expect-success: ## Run the linters test suite expecting successes
 	$(CURDIR)/test/run-super-linter-tests.sh \
 		$(SUPER_LINTER_TEST_CONTAINER_URL) \
 		"run_test_cases_expect_success" \
+		"$(IMAGE)"
+
+.PHONY: test-linters-bash-exec-ignore-libraries-expect-failure
+test-linters-bash-exec-ignore-libraries-expect-failure: ## Run the bash-exec linter test expecting failures
+	$(CURDIR)/test/run-super-linter-tests.sh \
+		$(SUPER_LINTER_TEST_CONTAINER_URL) \
+		"run_test_cases_bash_exec_ignore_libraries_expect_failure" \
+		"$(IMAGE)"
+
+.PHONY: test-linters-bash-exec-ignore-libraries-expect-success
+test-linters-bash-exec-ignore-libraries-expect-success: ## Run the bash-exec linter test expecting successes
+	$(CURDIR)/test/run-super-linter-tests.sh \
+		$(SUPER_LINTER_TEST_CONTAINER_URL) \
+		"run_test_cases_bash_exec_ignore_libraries_expect_success" \
 		"$(IMAGE)"
 
 .PHONY: test-linters-expect-failure
@@ -533,11 +558,40 @@ test-linters-expect-failure: ## Run the linters test suite expecting failures
 		"run_test_cases_expect_failure" \
 		"$(IMAGE)"
 
-.PHONY: test-log-level
-test-log-level: ## Run a test to check if there are conflicts with the LOG_LEVEL variable
+# Useful to check if any tool is using the LOG_LEVEL variable, besides Super-linter
+.PHONY: test-linters-expect-success-log-level-notice
+test-linters-expect-success-log-level-notice: ## Run the linters test suite expecting success with a LOG_LEVEL set to NOTICE
 	$(CURDIR)/test/run-super-linter-tests.sh \
 		$(SUPER_LINTER_TEST_CONTAINER_URL) \
-		"run_test_cases_log_level" \
+		"run_test_cases_expect_success_notice_log" \
+		"$(IMAGE)"
+
+.PHONY: test-linters-expect-success-suppress-output-on-success
+test-linters-expect-success-suppress-output-on-success: ## Run the linters test suite expecting successes but suppressing output
+	$(CURDIR)/test/run-super-linter-tests.sh \
+		$(SUPER_LINTER_TEST_CONTAINER_URL) \
+		"run_test_cases_expect_success_suppress_output_on_success" \
+		"$(IMAGE)"
+
+.PHONY: test-linters-expect-failure-suppress-output-on-success-log-level-notice
+test-linters-expect-failure-suppress-output-on-success-log-level-notice: ## Run the linters test suite expecting failures but suppressing output, with a LOG_LEVEL set to NOTICE
+	$(CURDIR)/test/run-super-linter-tests.sh \
+		$(SUPER_LINTER_TEST_CONTAINER_URL) \
+		"run_test_cases_expect_failure_suppress_output_on_success_notice_log" \
+		"$(IMAGE)"
+
+.PHONY: test-linters-expect-success-suppress-output-on-success-log-level-notice
+test-linters-expect-success-suppress-output-on-success-log-level-notice: ## Run the linters test suite expecting successes but suppressing output, with a LOG_LEVEL set to NOTICE
+	$(CURDIR)/test/run-super-linter-tests.sh \
+		$(SUPER_LINTER_TEST_CONTAINER_URL) \
+		"run_test_cases_expect_success_suppress_output_on_success_notice_log" \
+		"$(IMAGE)"
+
+.PHONY: test-linters-expect-failure-suppress-output-on-success
+test-linters-expect-failure-suppress-output-on-success: ## Run the linters test suite expecting falires but suppressing output
+	$(CURDIR)/test/run-super-linter-tests.sh \
+		$(SUPER_LINTER_TEST_CONTAINER_URL) \
+		"run_test_cases_expect_failure_suppress_output_on_success" \
 		"$(IMAGE)"
 
 .PHONY: test-linters-expect-failure-log-level-notice
@@ -547,67 +601,88 @@ test-linters-expect-failure-log-level-notice: ## Run the linters test suite expe
 		"run_test_cases_expect_failure_notice_log" \
 		"$(IMAGE)"
 
-.PHONY: test-bash-exec-library-expect-success
-test-bash-exec-library-expect-success: ## Run the linters test cases for BASH_EXEC expecting successes with BASH_EXEC_IGNORE_LIBRARIES set to true
-	$(CURDIR)/test/run-super-linter-tests.sh \
-		$(SUPER_LINTER_TEST_CONTAINER_URL) \
-		"run_test_case_bash_exec_library_expect_success" \
-		"$(IMAGE)"
-
-.PHONY: test-bash-exec-library-expect-failure
-test-bash-exec-library-expect-failure: ## Run the linters test cases for BASH_EXEC expecting failures with BASH_EXEC_IGNORE_LIBRARIES set to true
-	$(CURDIR)/test/run-super-linter-tests.sh \
-		$(SUPER_LINTER_TEST_CONTAINER_URL) \
-		"run_test_case_bash_exec_library_expect_failure" \
-		"$(IMAGE)"
-
-.PHONY: test-git-initial-commit
-test-git-initial-commit: ## Run super-linter against a repository that only has one commit
+.PHONY: test-github-event-initial-commit
+test-github-event-initial-commit: ## Run super-linter against a repository that only has one commit
 	$(CURDIR)/test/run-super-linter-tests.sh \
 		$(SUPER_LINTER_TEST_CONTAINER_URL) \
 		"run_test_case_git_initial_commit" \
 		"$(IMAGE)"
 
-.PHONY: test-git-merge-commit-push
-test-git-merge-commit-push: ## Run super-linter against a repository that has merge commits on a push event
+.PHONY: test-github-event-merge-commit-push-default-branch
+test-github-event-merge-commit-push-default-branch: ## Run super-linter against a repository that has merge commits on a push event
 	$(CURDIR)/test/run-super-linter-tests.sh \
 		$(SUPER_LINTER_TEST_CONTAINER_URL) \
-		"run_test_case_merge_commit_push" \
+		"run_test_case_merge_commit_push_default_branch" \
 		"$(IMAGE)"
 
-.PHONY: test-git-merge-commit-push-tag
-test-git-merge-commit-push-tag: ## Run super-linter against a repository that has merge commits and pushed a tag
+.PHONY: test-github-event-merge-commit-push-tag
+test-github-event-merge-commit-push-tag: ## Run super-linter against a repository that has merge commits and pushed a tag
 	$(CURDIR)/test/run-super-linter-tests.sh \
 		$(SUPER_LINTER_TEST_CONTAINER_URL) \
 		"run_test_case_merge_commit_push_tag" \
 		"$(IMAGE)"
 
-.PHONY: test-github-pr-event-multiple-commits
-test-github-pr-event-multiple-commits: ## Run super-linter against a repository that simulates a pull request event with multiple commits
+.PHONY: test-github-event-pr-event-multiple-commits
+test-github-event-pr-event-multiple-commits: ## Run super-linter against a repository that simulates a pull request event with multiple commits
 	$(CURDIR)/test/run-super-linter-tests.sh \
 		$(SUPER_LINTER_TEST_CONTAINER_URL) \
 		"run_test_case_github_pr_event_multiple_commits" \
 		"$(IMAGE)"
 
-.PHONY: test-github-push-event-multiple-commits
-test-github-push-event-multiple-commits: ## Run super-linter against a repository that simulates a push event with multiple commits
+.PHONY: test-github-event-push-event-multiple-commits-default-branch
+test-github-event-push-event-multiple-commits-default-branch: ## Run super-linter against a repository that simulates a push event with multiple commits
 	$(CURDIR)/test/run-super-linter-tests.sh \
 		$(SUPER_LINTER_TEST_CONTAINER_URL) \
-		"run_test_case_github_push_event_multiple_commits" \
+		"run_test_case_github_push_event_multiple_commits_default_branch" \
 		"$(IMAGE)"
 
-.PHONY: test-github-merge-group-event
-test-github-merge-group-event: ## Run super-linter against a repository that simulates a merge_group event
+.PHONY: test-github-event-push-event-multiple-commits-use-find-algorithm-default-branch
+test-github-event-push-event-multiple-commits-use-find-algorithm-default-branch: ## Run super-linter setting USE_FIND_ALGORITHM=true on a GitHub event
+	$(CURDIR)/test/run-super-linter-tests.sh \
+		$(SUPER_LINTER_TEST_CONTAINER_URL) \
+		"run_test_case_github_push_event_multiple_commits_use_find_algorithm_default_branch" \
+		"$(IMAGE)"
+
+.PHONY: test-github-event-push-initial-commit-multiple-commits
+test-github-event-push-initial-commit-multiple-commits: ## Run super-linter on a push event pushing the initial commit plus other commits
+	$(CURDIR)/test/run-super-linter-tests.sh \
+		$(SUPER_LINTER_TEST_CONTAINER_URL) \
+		"run_test_case_github_push_initial_commit_multiple_commits" \
+		"$(IMAGE)"
+
+.PHONY: test-github-event-push-force-push
+test-github-event-push-force-push: ## Run super-linter on a force push event
+	$(CURDIR)/test/run-super-linter-tests.sh \
+		$(SUPER_LINTER_TEST_CONTAINER_URL) \
+		"run_test_case_github_push_force_push" \
+		"$(IMAGE)"
+
+.PHONY: test-github-event-push-force-push-multiple-commits
+test-github-event-push-force-push-multiple-commits: ## Run super-linter on a force push event with multiple commits
+	$(CURDIR)/test/run-super-linter-tests.sh \
+		$(SUPER_LINTER_TEST_CONTAINER_URL) \
+		"run_test_case_github_push_force_push_multiple_commits" \
+		"$(IMAGE)"
+
+.PHONY: test-github-event-merge-group
+test-github-event-merge-group: ## Run super-linter against a repository that simulates a merge_group event
 	$(CURDIR)/test/run-super-linter-tests.sh \
 		$(SUPER_LINTER_TEST_CONTAINER_URL) \
 		"run_test_case_github_merge_group_event" \
 		"$(IMAGE)"
 
-.PHONY: test-use-find-and-ignore-gitignored-files
-test-use-find-and-ignore-gitignored-files: ## Run super-linter with USE_FIND_ALGORITHM=true and IGNORE_GITIGNORED_FILES=true
+.PHONY: test-github-event-repository-dispatch
+test-github-event-repository-dispatch: ## Run super-linter against a repository that simulates a repository_dispatch event
 	$(CURDIR)/test/run-super-linter-tests.sh \
 		$(SUPER_LINTER_TEST_CONTAINER_URL) \
-		"run_test_case_use_find_and_ignore_gitignored_files" \
+		"run_test_case_github_repository_dispatch" \
+		"$(IMAGE)"
+
+.PHONY: test-github-event-push-event-multiple-commits-use-find-algorithm-and-ignore-gitignored-files-default-branch
+test-github-event-push-event-multiple-commits-use-find-algorithm-and-ignore-gitignored-files-default-branch: ## Run super-linter with USE_FIND_ALGORITHM=true and IGNORE_GITIGNORED_FILES=true on a push event
+	$(CURDIR)/test/run-super-linter-tests.sh \
+		$(SUPER_LINTER_TEST_CONTAINER_URL) \
+		"run_test_case_github_push_event_multiple_commits_use_find_and_ignore_gitignored_files" \
 		"$(IMAGE)"
 
 .PHONY: test-save-super-linter-output
@@ -631,13 +706,6 @@ test-save-super-linter-custom-summary: ## Run super-linter with a custom SUPER_L
 		"run_test_case_custom_summary" \
 		"$(IMAGE)"
 
-.PHONY: test-custom-gitleaks-log-level
-test-custom-gitleaks-log-level: ## Run super-linter with a custom Gitleaks log level
-	$(CURDIR)/test/run-super-linter-tests.sh \
-		$(SUPER_LINTER_TEST_CONTAINER_URL) \
-		"run_test_case_gitleaks_custom_log_level" \
-		"$(IMAGE)"
-
 .PHONY: test-dont-save-super-linter-log-file
 test-dont-save-super-linter-log-file: ## Run super-linter without saving the Super-linter log file
 	$(CURDIR)/test/run-super-linter-tests.sh \
@@ -652,11 +720,18 @@ test-dont-save-super-linter-output: ## Run super-linter without saving Super-lin
 		"run_test_case_dont_save_super_linter_output" \
 		"$(IMAGE)"
 
-.PHONY: test-linter-command-options
-test-linter-command-options: ## Run super-linter passing options to linters
+.PHONY: test-git-invalid-worktree
+test-git-invalid-worktree: ## Run super-linter against a Git repository with worktrees
 	$(CURDIR)/test/run-super-linter-tests.sh \
 		$(SUPER_LINTER_TEST_CONTAINER_URL) \
-		"run_test_case_linter_command_options" \
+		"run_test_case_git_invalid_worktree" \
+		"$(IMAGE)"
+
+.PHONY: test-git-valid-worktree
+test-git-valid-worktree: ## Run super-linter against a Git repository with worktrees
+	$(CURDIR)/test/run-super-linter-tests.sh \
+		$(SUPER_LINTER_TEST_CONTAINER_URL) \
+		"run_test_case_git_valid_worktree" \
 		"$(IMAGE)"
 
 .PHONY: docker-dev-container-build-check ## Run Docker build checks against the dev-container image

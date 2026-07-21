@@ -1,9 +1,9 @@
 ---
-debug: true
 disable-telemetry: true
 exit-code: 1
 exit-on-eol: 2
 ignorefile: .github/linters/.trivyignore.yaml
+quiet: true
 scan:
   scanners:
     - vuln
@@ -17,8 +17,8 @@ scan:
     - "**/test/linters/dockerfile_hadolint"
     - "**/test/linters/go_modules"
     - "**/test/linters/jscpd"
+    - "**/test/linters/kubernetes_kubeconform"
     - "**/test/linters/terraform_fmt"
-    - "**/test/linters/terraform_terrascan"
     - "**/test/linters/terraform_tflint"
     - "**/test/linters/trivy/bad"
   skip-files:

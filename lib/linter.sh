@@ -7,11 +7,16 @@ set -o pipefail
 IMAGE="${IMAGE:-standard}"
 
 #########################
-# Source Function Files #
+# Source Globals and function Files #
 #########################
 # Source log functions and variables early so we can use them ASAP
 # shellcheck source=/dev/null
 source /action/lib/functions/log.sh # Source the function script(s)
+
+# shellcheck source=/dev/null
+source /action/lib/globals/main.sh
+# shellcheck source=/dev/null
+source /action/lib/globals/validation.sh
 
 # shellcheck source=/dev/null
 source /action/lib/functions/buildFileList.sh # Source the function script(s)
@@ -36,10 +41,6 @@ source /action/lib/functions/githubDomain.sh
 # shellcheck source=/dev/null
 source /action/lib/functions/output.sh
 
-if ! ValidateGitHubUrls; then
-  fatal "GitHub URLs failed validation"
-fi
-
 # We want a lowercase value
 declare -l RUN_LOCAL
 # Initialize RUN_LOCAL early because we need it for logging
@@ -47,20 +48,36 @@ RUN_LOCAL="${RUN_LOCAL:-"false"}"
 
 # Dynamically set the default behavior for GitHub Actions log markers because
 # we want to give users a chance to enable this even when running locally, but
-# we still want to provide a default value in case they don't want to explictly
+# we still want to provide a default value in case they don't want to explicitly
 # configure it.
 if [[ "${RUN_LOCAL}" == "true" ]]; then
   DEFAULT_ENABLE_GITHUB_ACTIONS_GROUP_TITLE="false"
   DEFAULT_ENABLE_GITHUB_ACTIONS_STEP_SUMMARY="false"
+  DEFAULT_ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT="false"
 else
   DEFAULT_ENABLE_GITHUB_ACTIONS_GROUP_TITLE="true"
   DEFAULT_ENABLE_GITHUB_ACTIONS_STEP_SUMMARY="true"
+  # shellcheck disable=SC2034 # Variable is referenced in other scripts
+  DEFAULT_ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT="true"
 fi
 # Let users configure GitHub Actions log markers regardless of running locally or not
 ENABLE_GITHUB_ACTIONS_GROUP_TITLE="${ENABLE_GITHUB_ACTIONS_GROUP_TITLE:-"${DEFAULT_ENABLE_GITHUB_ACTIONS_GROUP_TITLE}"}"
 export ENABLE_GITHUB_ACTIONS_GROUP_TITLE
 
 startGitHubActionsLogGroup "${SUPER_LINTER_INITIALIZATION_LOG_GROUP_TITLE}"
+
+if ! ValidateGitHubUrls; then
+  fatal "GitHub URLs failed validation"
+fi
+
+debug "GitHub server URL: ${GITHUB_SERVER_URL}"
+debug "GitHub API URL: ${GITHUB_API_URL}"
+debug "GitHub meta URL: ${GITHUB_META_URL}"
+
+# Sourcing it here because we need to initialize default values and GitHub URLs
+# first
+# shellcheck source=/dev/null
+source /action/lib/globals/output.sh
 
 # Let users configure GitHub Actions step summary regardless of running locally or not
 ENABLE_GITHUB_ACTIONS_STEP_SUMMARY="${ENABLE_GITHUB_ACTIONS_STEP_SUMMARY:-"${DEFAULT_ENABLE_GITHUB_ACTIONS_STEP_SUMMARY}"}"
@@ -163,6 +180,9 @@ declare -l FAIL_ON_CONFLICTING_TOOLS_ENABLED
 FAIL_ON_CONFLICTING_TOOLS_ENABLED="${FAIL_ON_CONFLICTING_TOOLS_ENABLED:-"false"}"
 export FAIL_ON_CONFLICTING_TOOLS_ENABLED
 
+declare -l EXPORT_GITHUB_TOKEN
+EXPORT_GITHUB_TOKEN="${EXPORT_GITHUB_TOKEN:-"false"}"
+
 # Define private output paths early because cleanup depends on those being defined
 DEFAULT_SUPER_LINTER_OUTPUT_DIRECTORY_NAME="super-linter-output"
 SUPER_LINTER_OUTPUT_DIRECTORY_NAME="${SUPER_LINTER_OUTPUT_DIRECTORY_NAME:-${DEFAULT_SUPER_LINTER_OUTPUT_DIRECTORY_NAME}}"
@@ -181,17 +201,12 @@ ValidateBooleanConfigurationVariables
 ###########
 # GLOBALS #
 ###########
-DEFAULT_RULES_LOCATION='/action/lib/.automation'                            # Default rules files location
-DEFAULT_SUPER_LINTER_WORKSPACE="/tmp/lint"                                  # Fall-back value for the workspace
-DEFAULT_WORKSPACE="${DEFAULT_WORKSPACE:-${DEFAULT_SUPER_LINTER_WORKSPACE}}" # Default workspace if running locally
 FILTER_REGEX_INCLUDE="${FILTER_REGEX_INCLUDE:-""}"
 export FILTER_REGEX_INCLUDE
 FILTER_REGEX_EXCLUDE="${FILTER_REGEX_EXCLUDE:-""}"
 export FILTER_REGEX_EXCLUDE
 # shellcheck disable=SC2034 # Variable is referenced in other scripts
 RAW_FILE_ARRAY=() # Array of all files that were changed
-# shellcheck disable=SC2034 # Variable is referenced in other scripts
-TEST_CASE_FOLDER='test/linters' # Folder for test cases we should always ignore
 
 # Set the log level
 TF_LOG_LEVEL="info"
@@ -212,9 +227,11 @@ source /action/lib/globals/linterRules.sh
 # shellcheck source=/dev/null
 source /action/lib/globals/languages.sh
 
-# Load runtime depenendencies variables
+# Load runtime dependencies variables
 # shellcheck source=/dev/null
 source /action/lib/globals/runtimeDependencies.sh
+
+debug "FILTER_REGEX_INCLUDE: ${FILTER_REGEX_INCLUDE}, FILTER_REGEX_EXCLUDE: ${FILTER_REGEX_EXCLUDE}, TEST_CASE_RUN: ${TEST_CASE_RUN}"
 
 Header() {
   if [[ "${SUPPRESS_POSSUM}" == "false" ]]; then
@@ -222,13 +239,13 @@ Header() {
   fi
 
   info "---------------------------------------------"
-  info "--- GitHub Actions Multi Language Linter ----"
+  info " Super-linter"
   info " - Image Creation Date: ${BUILD_DATE}"
   info " - Image Revision: ${BUILD_REVISION}"
   info " - Image Version: ${BUILD_VERSION}"
   info "---------------------------------------------"
   info "---------------------------------------------"
-  info "The Super-Linter source code can be found at:"
+  info " Super-Linter source code can be found at:"
   info " - https://github.com/super-linter/super-linter"
   info "---------------------------------------------"
 
@@ -241,126 +258,149 @@ Header() {
 }
 
 GetGitHubVars() {
-  info "--------------------------------------------"
-  info "Gathering GitHub information..."
+  debug "Initializing Git environment variables..."
 
-  local GITHUB_REPOSITORY_DEFAULT_BRANCH
-  GITHUB_REPOSITORY_DEFAULT_BRANCH="master"
-
-  if [[ ${RUN_LOCAL} != "false" ]]; then
+  if [[ "${RUN_LOCAL}" == "true" ]]; then
     info "RUN_LOCAL has been set to: ${RUN_LOCAL}. Bypassing GitHub Actions variables..."
-
-    if [ -z "${GITHUB_WORKSPACE:-}" ]; then
-      GITHUB_WORKSPACE="${DEFAULT_WORKSPACE}"
-    fi
-
-    ValidateGitHubWorkspace "${GITHUB_WORKSPACE}"
-
-    pushd "${GITHUB_WORKSPACE}" >/dev/null || exit 1
 
     if [[ "${USE_FIND_ALGORITHM}" == "false" ]]; then
       debug "Initializing GITHUB_SHA considering ${GITHUB_WORKSPACE}"
-      GITHUB_SHA=$(git -C "${GITHUB_WORKSPACE}" rev-parse HEAD)
+      local DOT_GIT_PATH="${GITHUB_WORKSPACE}/.git"
+      debug "Checking if ${DOT_GIT_PATH} is a file or a directory."
+      if [[ -f "${DOT_GIT_PATH}" ]]; then
+        debug "${DOT_GIT_PATH} exists and is a file. Assuming that this is a worktree."
+
+        local GIT_DIRECTORY_PATH_WORKTREE
+        GIT_DIRECTORY_PATH_WORKTREE="$(cat "${DOT_GIT_PATH}" | awk '{ print $2 }')"
+        local RET_CODE=$?
+        if [[ "${RET_CODE}" -gt 0 ]]; then
+          fatal "Error while getting .git directory path while in a worktree: ${GIT_DIRECTORY_PATH_WORKTREE}"
+        fi
+
+        debug ".git directory path referenced by the worktree: ${GIT_DIRECTORY_PATH_WORKTREE}"
+
+        if [[ ! -e "${GIT_DIRECTORY_PATH_WORKTREE}" ]]; then
+          fatal "${GIT_DIRECTORY_PATH_WORKTREE} doesn't exist. Ensure to mount it as a volume when running the Super-linter container. See https://github.com/super-linter/super-linter/blob/main/docs/run-linter-locally.md"
+        fi
+      else
+        debug "${DOT_GIT_PATH} is a directory. Assuming that this is not a worktree"
+      fi
+
+      GITHUB_SHA="$(git -C "${GITHUB_WORKSPACE}" rev-parse HEAD)"
       local RET_CODE=$?
       if [[ "${RET_CODE}" -gt 0 ]]; then
         fatal "Failed to initialize GITHUB_SHA. Output: ${GITHUB_SHA}"
       fi
       info "Initialized GITHUB_SHA to: ${GITHUB_SHA}"
 
+      if ! ValidateGitShaReference "${GITHUB_SHA}"; then
+        fatal "Failed to validate GITHUB_SHA"
+      fi
+
       if ! InitializeRootCommitSha; then
         fatal "Failed to initialize root commit"
       fi
+
+      GITHUB_BEFORE_SHA="${DEFAULT_BRANCH}"
+      debug "Setting GITHUB_BEFORE_SHA to ${GITHUB_BEFORE_SHA}"
     else
-      debug "Skip the initalization of GITHUB_SHA because we don't need it"
+      debug "Skip the initialization of Git variables because USE_FIND_ALGORITHM is ${USE_FIND_ALGORITHM}"
     fi
 
     MULTI_STATUS="false"
     debug "Setting MULTI_STATUS to ${MULTI_STATUS} because we are not running on GitHub Actions"
   else
-    ValidateGitHubWorkspace "${GITHUB_WORKSPACE}"
-
-    if [ -z "${GITHUB_EVENT_PATH:-}" ]; then
-      fatal "Failed to get GITHUB_EVENT_PATH: ${GITHUB_EVENT_PATH}]"
-    else
-      info "Successfully found GITHUB_EVENT_PATH: ${GITHUB_EVENT_PATH}]"
-    fi
-
-    if [[ ! -e "${GITHUB_EVENT_PATH}" ]]; then
-      fatal "${GITHUB_EVENT_PATH} doesn't exist or it's not readable"
-    else
-      debug "${GITHUB_EVENT_PATH} exists and it's readable"
-      debug "${GITHUB_EVENT_PATH} contents:\n$(cat "${GITHUB_EVENT_PATH}")"
-    fi
-
-    if [ -z "${GITHUB_SHA:-}" ]; then
-      fatal "Failed to get GITHUB_SHA: ${GITHUB_SHA}"
-    else
-      info "Successfully found GITHUB_SHA: ${GITHUB_SHA}"
-    fi
-
-    if ! InitializeRootCommitSha; then
-      fatal "Failed to initialize root commit"
-    fi
-
-    debug "This is a ${GITHUB_EVENT_NAME} event"
-
-    if [ "${GITHUB_EVENT_NAME}" == "pull_request" ]; then
-      # GITHUB_SHA on PR events is not the latest commit.
-      # https://docs.github.com/en/actions/reference/events-that-trigger-workflows#pull_request
-      # "Note that GITHUB_SHA for this [pull_request] event is the last merge commit of the pull request merge branch.
-      # If you want to get the commit ID for the last commit to the head branch of the pull request,
-      # use github.event.pull_request.head.sha instead."
-      debug "Updating the current GITHUB_SHA (${GITHUB_SHA}) to the pull request HEAD SHA"
-
-      GITHUB_SHA="$(GetPullRequestHeadSha "${GITHUB_EVENT_PATH}")"
-      local RET_CODE=$?
-      if [[ "${RET_CODE}" -gt 0 ]]; then
-        fatal "Failed to update GITHUB_SHA for ${GITHUB_EVENT_NAME} event: ${GITHUB_SHA}"
-      fi
-      debug "Updated GITHUB_SHA: ${GITHUB_SHA}"
-
-      GITHUB_EVENT_COMMIT_COUNT=$(GetGithubPullRequestEventCommitCount "${GITHUB_EVENT_PATH}")
-      RET_CODE=$?
-      if [[ "${RET_CODE}" -gt 0 ]]; then
-        fatal "Failed to get GITHUB_EVENT_COMMIT_COUNT. Output: ${GITHUB_EVENT_COMMIT_COUNT}"
+    if [[ "${USE_FIND_ALGORITHM}" == "false" ]]; then
+      if [ -z "${GITHUB_EVENT_PATH:-}" ]; then
+        fatal "Failed to get GITHUB_EVENT_PATH: ${GITHUB_EVENT_PATH}]"
       else
-        debug "Successfully found commit count for ${GITHUB_EVENT_NAME} event: ${GITHUB_EVENT_COMMIT_COUNT}"
+        info "Successfully found GITHUB_EVENT_PATH: ${GITHUB_EVENT_PATH}]"
       fi
-    elif [ "${GITHUB_EVENT_NAME}" == "push" ]; then
-      GITHUB_EVENT_COMMIT_COUNT=$(GetGithubPushEventCommitCount "${GITHUB_EVENT_PATH}")
-      RET_CODE=$?
-      if [[ "${RET_CODE}" -gt 0 ]]; then
-        fatal "Failed to get GITHUB_EVENT_COMMIT_COUNT. Output: ${GITHUB_EVENT_COMMIT_COUNT}"
+
+      if [[ ! -e "${GITHUB_EVENT_PATH}" ]]; then
+        fatal "${GITHUB_EVENT_PATH} doesn't exist or it's not readable"
+      else
+        debug "${GITHUB_EVENT_PATH} exists and it's readable"
+        debug "${GITHUB_EVENT_PATH} contents:\n$(cat "${GITHUB_EVENT_PATH}")"
       fi
-      debug "Successfully found commit count for ${GITHUB_EVENT_NAME} event: ${GITHUB_EVENT_COMMIT_COUNT}"
-    fi
 
-    if [[ -n "${GITHUB_EVENT_COMMIT_COUNT:-}" ]]; then
-      debug "Initializing GITHUB_BEFORE_SHA because GITHUB_EVENT_COMMIT_COUNT is defined: ${GITHUB_EVENT_COMMIT_COUNT}"
-      InitializeAndValidateGitBeforeShaReference "${GITHUB_SHA}" "${GITHUB_EVENT_COMMIT_COUNT}" "${GIT_ROOT_COMMIT_SHA}"
-    fi
+      if [ -z "${GITHUB_SHA:-}" ]; then
+        fatal "Failed to get GITHUB_SHA: ${GITHUB_SHA}"
+      else
+        info "Successfully found GITHUB_SHA: ${GITHUB_SHA}"
+      fi
 
-    GITHUB_REPOSITORY_DEFAULT_BRANCH=$(GetGithubRepositoryDefaultBranch "${GITHUB_EVENT_PATH}")
-    local RET_CODE=$?
-    if [[ "${RET_CODE}" -gt 0 ]]; then
-      fatal "Failed to get GITHUB_REPOSITORY_DEFAULT_BRANCH. Output: ${GITHUB_REPOSITORY_DEFAULT_BRANCH}"
+      if ! ValidateGitShaReference "${GITHUB_SHA}"; then
+        fatal "Failed to validate GITHUB_SHA"
+      fi
+
+      if ! InitializeRootCommitSha; then
+        fatal "Failed to initialize root commit"
+      fi
+
+      debug "This is a ${GITHUB_EVENT_NAME} event"
+
+      if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+        # GITHUB_SHA on PR events is not the latest commit.
+        # https://docs.github.com/en/actions/reference/events-that-trigger-workflows#pull_request
+        # "Note that GITHUB_SHA for this [pull_request] event is the last merge commit of the pull request merge branch.
+        # If you want to get the commit ID for the last commit to the head branch of the pull request,
+        # use github.event.pull_request.head.sha instead."
+        debug "Updating the current GITHUB_SHA (${GITHUB_SHA}) to the pull request HEAD SHA"
+
+        GITHUB_SHA="$(GetPullRequestHeadSha "${GITHUB_EVENT_PATH}")"
+        local RET_CODE=$?
+        if [[ "${RET_CODE}" -gt 0 ]]; then
+          fatal "Failed to update GITHUB_SHA for ${GITHUB_EVENT_NAME} event: ${GITHUB_SHA}"
+        fi
+        debug "Updated GITHUB_SHA: ${GITHUB_SHA}"
+
+        GITHUB_PULL_REQUEST_NUMBER="$(GetPullRequestNumber "${GITHUB_EVENT_PATH}")"
+        RET_CODE=$?
+        if [[ "${RET_CODE}" -gt 0 ]]; then
+          fatal "Failed to get GITHUB_PULL_REQUEST_NUMBER. Output: ${GITHUB_PULL_REQUEST_NUMBER:-"not set"}"
+        fi
+        debug "Successfully found 'number' for ${GITHUB_EVENT_NAME} event: ${GITHUB_PULL_REQUEST_NUMBER}"
+      elif [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+        local FORCE_PUSH_EVENT
+        FORCE_PUSH_EVENT=$(GetGitHubEventForced "${GITHUB_EVENT_PATH}")
+        RET_CODE=$?
+        if [[ "${RET_CODE}" -gt 0 ]]; then
+          fatal "Failed to get FORCE_PUSH_EVENT. Output: ${FORCE_PUSH_EVENT:-"not set"}"
+        fi
+        debug "Successfully found 'forced' for ${GITHUB_EVENT_NAME} event: ${FORCE_PUSH_EVENT}"
+
+        local GITHUB_EVENT_PUSH_BEFORE
+        GITHUB_EVENT_PUSH_BEFORE=$(GetGitHubEventPushBefore "${GITHUB_EVENT_PATH}")
+        RET_CODE=$?
+        if [[ "${RET_CODE}" -gt 0 ]]; then
+          fatal "Failed to get GITHUB_EVENT_PUSH_BEFORE. Output: ${GITHUB_EVENT_PUSH_BEFORE:-"not set"}"
+        fi
+        debug "Successfully found the commit hash of the 'before' commit for ${GITHUB_EVENT_NAME} event: ${GITHUB_EVENT_PUSH_BEFORE}"
+
+        local GITHUB_EVENT_FIRST_PUSHED_COMMIT
+        GITHUB_EVENT_FIRST_PUSHED_COMMIT=$(GetGithubPushFirstPushedCommitHash "${GITHUB_EVENT_PATH}")
+        RET_CODE=$?
+        if [[ "${RET_CODE}" -gt 0 ]]; then
+          fatal "Failed to get GITHUB_EVENT_FIRST_PUSHED_COMMIT. Output: ${GITHUB_EVENT_FIRST_PUSHED_COMMIT:-"not set"}"
+        fi
+        debug "Successfully found the commit hash of the first pushed commit for ${GITHUB_EVENT_NAME} event: ${GITHUB_EVENT_FIRST_PUSHED_COMMIT}"
+      fi
+
+      if ! InitializeGitBeforeShaReference "${GITHUB_SHA}" "${GIT_ROOT_COMMIT_SHA}" "${GITHUB_EVENT_NAME}" "${DEFAULT_BRANCH}" "${FORCE_PUSH_EVENT:-""}" "${GITHUB_EVENT_PUSH_BEFORE:-""}" "${GITHUB_EVENT_FIRST_PUSHED_COMMIT:-""}"; then
+        fatal "Error while initializing GITHUB_BEFORE_SHA"
+      fi
+
+      if ! ValidateGitHubEvent "${GITHUB_EVENT_NAME}" "${VALIDATE_ALL_CODEBASE}" && [[ "${FAIL_ON_INVALID_GITHUB_ACTIONS_EVENT_CONFIGURATION}" == "true" ]]; then
+        fatal "Error while validating Super-linter configuration for specific GitHub Actions events"
+      fi
+    else
+      debug "Skip the initialization of Git variables because USE_FIND_ALGORITHM is ${USE_FIND_ALGORITHM}"
     fi
   fi
 
-  if [ -z "${GITHUB_REPOSITORY_DEFAULT_BRANCH}" ]; then
-    fatal "Failed to get GITHUB_REPOSITORY_DEFAULT_BRANCH"
-  else
-    debug "Successfully detected the default branch for this repository: ${GITHUB_REPOSITORY_DEFAULT_BRANCH}"
-  fi
-
-  DEFAULT_BRANCH="${DEFAULT_BRANCH:-${GITHUB_REPOSITORY_DEFAULT_BRANCH}}"
-
-  if [[ "${DEFAULT_BRANCH}" != "${GITHUB_REPOSITORY_DEFAULT_BRANCH}" ]]; then
-    debug "The default branch for this repository was set to ${GITHUB_REPOSITORY_DEFAULT_BRANCH}, but it was explicitly overridden using the DEFAULT_BRANCH variable, and set to: ${DEFAULT_BRANCH}"
-  fi
-  info "The default branch for this repository is set to: ${DEFAULT_BRANCH}"
-
-  if [ "${MULTI_STATUS}" == "true" ]; then
+  if [[ "${MULTI_STATUS}" == "true" ]] ||
+    [[ "${ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT}" == "true" ]]; then
 
     if [[ ${RUN_LOCAL} == "true" ]]; then
       # Safety check. This shouldn't occur because we forcefully set MULTI_STATUS=false above
@@ -369,7 +409,7 @@ GetGitHubVars() {
     fi
 
     if [ -z "${GITHUB_TOKEN:-}" ]; then
-      fatal "Failed to get [GITHUB_TOKEN]. Terminating because status reports were explicitly enabled, but GITHUB_TOKEN was not provided."
+      fatal "Failed to get GITHUB_TOKEN. Terminating because status reports (MULTI_STATUS: ${MULTI_STATUS}) or pull request summary comments (ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT: ${ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT}) were explicitly enabled, but GITHUB_TOKEN was not provided."
     else
       info "Successfully found GITHUB_TOKEN."
     fi
@@ -386,65 +426,18 @@ GetGitHubVars() {
       info "Successfully found GITHUB_RUN_ID ${GITHUB_RUN_ID}"
     fi
 
+    # Initialize GitHub API URLs
+
     GITHUB_STATUS_URL="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}"
-    debug "GitHub Status URL: ${GITHUB_STATUS_URL}"
+    debug "Setting GITHUB_STATUS_URL to: ${GITHUB_STATUS_URL}"
 
-    GITHUB_STATUS_TARGET_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-    debug "GitHub Status target URL: ${GITHUB_STATUS_TARGET_URL}"
+    GITHUB_WORKFLOW_RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+    debug "Setting GITHUB_WORKFLOW_RUN_URL to: ${GITHUB_WORKFLOW_RUN_URL}"
+
+    GITHUB_ISSUES_URL="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/issues"
+    debug "Setting GITHUB_ISSUES_URL to: ${GITHUB_ISSUES_URL}"
   else
-    debug "Skip GITHUB_TOKEN, GITHUB_REPOSITORY, and GITHUB_RUN_ID validation because we don't need these variables for GitHub Actions status reports. MULTI_STATUS: ${MULTI_STATUS}"
-  fi
-
-  # We need this for parallel
-  export GITHUB_WORKSPACE
-}
-
-CallStatusAPI() {
-  LANGUAGE="${1}" # language that was validated
-  STATUS="${2}"   # success | error
-  SUCCESS_MSG='No errors were found in the linting process'
-  FAIL_MSG='Errors were detected, please view logs'
-  MESSAGE='' # Message to send to status API
-
-  debug "Calling Multi-Status API for $LANGUAGE with status $STATUS"
-
-  ######################################
-  # Check the status to create message #
-  ######################################
-  if [ "${STATUS}" == "success" ]; then
-    # Success
-    MESSAGE="${SUCCESS_MSG}"
-  else
-    # Failure
-    MESSAGE="${FAIL_MSG}"
-  fi
-
-  ##########################################################
-  # Check to see if were enabled for multi Status mesaages #
-  ##########################################################
-  if [ "${MULTI_STATUS}" == "true" ] && [ -n "${GITHUB_TOKEN}" ] && [ -n "${GITHUB_REPOSITORY}" ]; then
-
-    # make sure we honor DISABLE_ERRORS
-    if [ "${DISABLE_ERRORS}" == "true" ]; then
-      STATUS="success"
-    fi
-
-    ##############################################
-    # Call the status API to create status check #
-    ##############################################
-    if ! SEND_STATUS_CMD=$(
-      curl -f -s --show-error -X POST \
-        --url "${GITHUB_STATUS_URL}" \
-        -H 'accept: application/vnd.github.v3+json' \
-        -H "authorization: Bearer ${GITHUB_TOKEN}" \
-        -H 'content-type: application/json' \
-        -d "{ \"state\": \"${STATUS}\",
-        \"target_url\": \"${GITHUB_STATUS_TARGET_URL}\",
-        \"description\": \"${MESSAGE}\", \"context\": \"--> Linted: ${LANGUAGE}\"
-      }" 2>&1
-    ); then
-      info "Failed to call GitHub Status API: ${SEND_STATUS_CMD}"
-    fi
+    debug "Skip GITHUB_TOKEN, GITHUB_REPOSITORY, and GITHUB_RUN_ID validation because we don't need these variables for GitHub Actions status reports. MULTI_STATUS: ${MULTI_STATUS}, ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT: ${ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT}"
   fi
 }
 
@@ -458,64 +451,149 @@ Footer() {
   local SUPER_LINTER_EXIT_CODE
   SUPER_LINTER_EXIT_CODE=0
 
+  declare -a FAILED_LANGUAGES
+  FAILED_LANGUAGES=()
+
+  local SUPER_LINTER_PARALLEL_STDOUT_PREFIX="${SUPER_LINTER_PRIVATE_OUTPUT_DIRECTORY_PATH}/super-linter-parallel-stdout-"
+  local SUPER_LINTER_PARALLEL_STDERR_PREFIX="${SUPER_LINTER_PRIVATE_OUTPUT_DIRECTORY_PATH}/super-linter-parallel-stderr-"
+
   if [[ "${SAVE_SUPER_LINTER_SUMMARY}" == "true" ]]; then
     debug "Saving Super-linter summary to ${SUPER_LINTER_SUMMARY_OUTPUT_PATH}"
     WriteSummaryHeader "${SUPER_LINTER_SUMMARY_OUTPUT_PATH}"
   fi
 
+  local STARTED_GITHUB_ACTIONS_LOG_GROUP="false"
+
   for LANGUAGE in "${LANGUAGE_ARRAY[@]}"; do
+
+    # Start the log group as soon as possible if debug logging is enabled so
+    # we group all messages for LANGUAGE even when debugging
+    if [[ "${LOG_DEBUG}" == "true" ]]; then
+      startGitHubActionsLogGroup "${LANGUAGE}"
+      STARTED_GITHUB_ACTIONS_LOG_GROUP="true"
+    fi
+
     # This used to be the count of errors found for a given LANGUAGE, but since
     # after we switched to running linters against a batch of files, it may not
     # represent the actual number of files that didn't pass the validation,
     # but a number that's less than that because of how GNU parallel returns
     # exit codes.
     # Ref: https://www.gnu.org/software/parallel/parallel.html#exit-status
-    ERROR_COUNTER_FILE_PATH="${SUPER_LINTER_PRIVATE_OUTPUT_DIRECTORY_PATH}/super-linter-parallel-command-exit-code-${LANGUAGE}"
+    local ERROR_COUNTER_FILE_PATH="${SUPER_LINTER_PRIVATE_OUTPUT_DIRECTORY_PATH}/super-linter-parallel-command-exit-code-${LANGUAGE}"
+    debug "ERROR_COUNTER_FILE_PATH for ${LANGUAGE}: ${ERROR_COUNTER_FILE_PATH}"
+
     if [ ! -f "${ERROR_COUNTER_FILE_PATH}" ]; then
       debug "Error counter ${ERROR_COUNTER_FILE_PATH} doesn't exist"
     else
       ERROR_COUNTER=$(<"${ERROR_COUNTER_FILE_PATH}")
       debug "ERROR_COUNTER for ${LANGUAGE}: ${ERROR_COUNTER}"
+      local GITHUB_COMMIT_STATUS_MESSAGE
+
+      local STDOUT_LINTER_FILE_PATH="${SUPER_LINTER_PARALLEL_STDOUT_PREFIX}${LANGUAGE}"
+      debug "STDOUT_LINTER_FILE_PATH for ${LANGUAGE}: ${STDOUT_LINTER_FILE_PATH}"
+      local STDERR_LINTER_FILE_PATH="${SUPER_LINTER_PARALLEL_STDERR_PREFIX}${LANGUAGE}"
+      debug "STDERR_LINTER_FILE_PATH for ${LANGUAGE}: ${STDERR_LINTER_FILE_PATH}"
+
+      local STDOUT_LINTER_MESSAGE=""
+      if [[ -e "${STDOUT_LINTER_FILE_PATH}" ]]; then
+        STDOUT_LINTER_MESSAGE="Stdout contents for ${LANGUAGE}:\n------\n$(<"${STDOUT_LINTER_FILE_PATH}")\n------"
+      else
+        debug "Stdout output file path for ${LANGUAGE} (${STDOUT_LINTER_FILE_PATH}) doesn't exist"
+      fi
+
+      local STDERR_LINTER_MESSAGE=""
+      if [[ -e "${STDERR_LINTER_FILE_PATH}" ]]; then
+        STDERR_LINTER_MESSAGE="Stderr contents for ${LANGUAGE}:\n------\n$(<"${STDERR_LINTER_FILE_PATH}")\n------"
+      else
+        debug "Stderr output file path for ${LANGUAGE} (${STDERR_LINTER_FILE_PATH}) doesn't exist"
+      fi
 
       if [[ ${ERROR_COUNTER} -ne 0 ]]; then
+        # Start the log group if we didn't start it before. There's no need to
+        # check if other log levels are enabled because the user cannot silence
+        # errors
+        if [[ "${STARTED_GITHUB_ACTIONS_LOG_GROUP}" == "false" ]]; then
+          startGitHubActionsLogGroup "${LANGUAGE}"
+          STARTED_GITHUB_ACTIONS_LOG_GROUP="true"
+        fi
+
         error "Errors found in ${LANGUAGE}"
+        if [[ -n "${STDOUT_LINTER_MESSAGE:-}" ]]; then
+          error "${STDOUT_LINTER_MESSAGE}"
+        fi
+        if [[ -n "${STDERR_LINTER_MESSAGE:-}" ]]; then
+          error "${STDERR_LINTER_MESSAGE}"
+        fi
+
+        FAILED_LANGUAGES+=("${LANGUAGE}")
 
         if [[ "${SAVE_SUPER_LINTER_SUMMARY}" == "true" ]]; then
           WriteSummaryLineFailure "${SUPER_LINTER_SUMMARY_OUTPUT_PATH}" "${LANGUAGE}"
         fi
 
-        # Print stdout and stderr in case the log level is higher than INFO
-        # so users still get feedback. Print output as error so it gets emitted
-        if [[ "${LOG_VERBOSE}" != "true" ]]; then
-          local STDOUT_LINTER_FILE_PATH
-          STDOUT_LINTER_FILE_PATH="${SUPER_LINTER_PRIVATE_OUTPUT_DIRECTORY_PATH}/super-linter-parallel-stdout-${LANGUAGE}"
-          if [[ -e "${STDOUT_LINTER_FILE_PATH}" ]]; then
-            error "Stdout contents for ${LANGUAGE}:\n------\n$(cat "${STDOUT_LINTER_FILE_PATH}")\n------"
-          else
-            debug "Stdout output file path for ${LANGUAGE} (${STDOUT_LINTER_FILE_PATH}) doesn't exist"
-          fi
+        GITHUB_COMMIT_STATUS_MESSAGE="error"
 
-          local STDERR_LINTER_FILE_PATH
-          STDERR_LINTER_FILE_PATH="${SUPER_LINTER_PRIVATE_OUTPUT_DIRECTORY_PATH}/super-linter-parallel-stderr-${LANGUAGE}"
-          if [[ -e "${STDERR_LINTER_FILE_PATH}" ]]; then
-            error "Stderr contents for ${LANGUAGE}:\n------\n$(cat "${STDERR_LINTER_FILE_PATH}")\n------"
-          else
-            debug "Stderr output file path for ${LANGUAGE} (${STDERR_LINTER_FILE_PATH}) doesn't exist"
-          fi
-        fi
-        CallStatusAPI "${LANGUAGE}" "error"
         SUPER_LINTER_EXIT_CODE=1
         debug "Setting super-linter exit code to ${SUPER_LINTER_EXIT_CODE} because there were errors for ${LANGUAGE}"
       elif [[ ${ERROR_COUNTER} -eq 0 ]]; then
-        notice "Successfully linted ${LANGUAGE}"
+        if [[ "${SUPPRESS_OUTPUT_ON_SUCCESS}" == "true" ]]; then
+          debug "SUPPRESS_OUTPUT_ON_SUCCESS is ${SUPPRESS_OUTPUT_ON_SUCCESS}. Emitting success for ${LANGUAGE} at debug level"
+          debug "Successfully linted ${LANGUAGE}"
+          if [[ -n "${STDOUT_LINTER_MESSAGE:-}" ]]; then
+            debug "${STDOUT_LINTER_MESSAGE}"
+          fi
+          if [[ -n "${STDERR_LINTER_MESSAGE:-}" ]]; then
+            debug "${STDERR_LINTER_MESSAGE}"
+          fi
+        else
+          # Start the log group if we didn't start it before and if LOG_NOTICE is
+          # enabled because the success message is printed at NOTICE level, or if
+          # LOG_VERBOSE is enabled because stdout and stderr for LANGUAGE are
+          # printed at INFO level.
+          if [[ "${STARTED_GITHUB_ACTIONS_LOG_GROUP}" == "false" ]] &&
+            [[ ("${LOG_NOTICE}" == "true" || "${LOG_VERBOSE}" == "true") ]]; then
+            startGitHubActionsLogGroup "${LANGUAGE}"
+            STARTED_GITHUB_ACTIONS_LOG_GROUP="true"
+          fi
+
+          notice "Successfully linted ${LANGUAGE}"
+          if [[ -n "${STDOUT_LINTER_MESSAGE:-}" ]]; then
+            info "${STDOUT_LINTER_MESSAGE}"
+          fi
+          if [[ -n "${STDERR_LINTER_MESSAGE:-}" ]]; then
+            info "${STDERR_LINTER_MESSAGE}"
+          fi
+        fi
+
         if [[ "${SAVE_SUPER_LINTER_SUMMARY}" == "true" ]]; then
           WriteSummaryLineSuccess "${SUPER_LINTER_SUMMARY_OUTPUT_PATH}" "${LANGUAGE}"
         fi
-        CallStatusAPI "${LANGUAGE}" "success"
+        GITHUB_COMMIT_STATUS_MESSAGE="success"
+
         ANY_LINTER_SUCCESS="true"
         debug "Set ANY_LINTER_SUCCESS to ${ANY_LINTER_SUCCESS} because ${LANGUAGE} reported a success"
       fi
+
+      if [[ "${MULTI_STATUS}" == "true" ]]; then
+        if ! CreateGitHubCommitStatus "${LANGUAGE}" "${GITHUB_COMMIT_STATUS_MESSAGE}"; then
+          # Start the log group if we didn't start it before and if LOG_WARN is
+          # enabled because the following error message is printed at WARNING
+          # level
+          if [[ "${STARTED_GITHUB_ACTIONS_LOG_GROUP}" == "false" ]] &&
+            [[ "${LOG_WARN}" == "true" ]]; then
+            startGitHubActionsLogGroup "${LANGUAGE}"
+            STARTED_GITHUB_ACTIONS_LOG_GROUP="true"
+          fi
+          warn "Error while creating GitHub commit status for ${LANGUAGE}."
+        fi
+      fi
     fi
+
+    if [[ "${STARTED_GITHUB_ACTIONS_LOG_GROUP}" == "true" ]]; then
+      endGitHubActionsLogGroup "${LANGUAGE}"
+      STARTED_GITHUB_ACTIONS_LOG_GROUP="false"
+    fi
+
   done
 
   if [[ "${ANY_LINTER_SUCCESS}" == "true" ]] && [[ ${SUPER_LINTER_EXIT_CODE} -ne 0 ]]; then
@@ -541,6 +619,41 @@ Footer() {
   fi
 
   if [[ "${SAVE_SUPER_LINTER_SUMMARY}" == "true" ]]; then
+    WriteSummaryFooterMoreInfo "${SUPER_LINTER_SUMMARY_OUTPUT_PATH}"
+    WriteSummaryFooterSuperLinterInfo "${SUPER_LINTER_SUMMARY_OUTPUT_PATH}"
+
+    for LANGUAGE in "${FAILED_LANGUAGES[@]}"; do
+      local STDOUT_LINTER_FILE_PATH="${SUPER_LINTER_PARALLEL_STDOUT_PREFIX}${LANGUAGE}"
+      local STDERR_LINTER_FILE_PATH="${SUPER_LINTER_PARALLEL_STDERR_PREFIX}${LANGUAGE}"
+      debug "Writing stdout (${STDOUT_LINTER_FILE_PATH}) and stderr (${STDERR_LINTER_FILE_PATH}) to summary file for ${LANGUAGE}"
+      local BODY=""
+      if [[ -s "${STDOUT_LINTER_FILE_PATH}" ]]; then
+        debug "Writing stdout for ${LANGUAGE} to body"
+        if ! BODY+="$(<"${STDOUT_LINTER_FILE_PATH}")"; then
+          fatal "Error while loading stdout for ${LANGUAGE}"
+        fi
+      fi
+
+      if [[ -s "${STDERR_LINTER_FILE_PATH}" ]] &&
+        # Exclude Trivy stderr because it only contains low-level debug info
+        [[ "${LANGUAGE}" != "TRIVY" ]]; then
+        debug "Writing stderr for ${LANGUAGE} to body"
+        if ! BODY+="$(<"${STDERR_LINTER_FILE_PATH}")"; then
+          fatal "Error while writing stderr for ${LANGUAGE}"
+        fi
+      fi
+
+      if [[ -n "${BODY}" ]]; then
+        debug "Writing body for ${LANGUAGE} to summary"
+        if ! BODY="$(WriteMarkdownCodeBlock "${BODY}" "text")"; then
+          fatal "Error while writing markdown code block for summary details"
+        fi
+        if ! WriteMarkdownCollapsedSection "${SUPER_LINTER_SUMMARY_OUTPUT_PATH}" "${LANGUAGE}" "${BODY}"; then
+          fatal "Error while writing summary details for ${LANGUAGE} to ${SUPER_LINTER_SUMMARY_OUTPUT_PATH}"
+        fi
+      fi
+    done
+
     if ! FormatSuperLinterSummaryFile "${SUPER_LINTER_SUMMARY_OUTPUT_PATH}"; then
       fatal "Error while formatting the Super-linter summary file."
     fi
@@ -551,6 +664,15 @@ Footer() {
     debug "Appending Super-linter summary to ${GITHUB_STEP_SUMMARY}"
     if ! cat "${SUPER_LINTER_SUMMARY_OUTPUT_PATH}" >>"${GITHUB_STEP_SUMMARY}"; then
       fatal "Error while appending the content of ${SUPER_LINTER_SUMMARY_OUTPUT_PATH} to ${GITHUB_STEP_SUMMARY}"
+    fi
+  fi
+
+  if [[ "${ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT}" == "true" ]] &&
+    [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]] &&
+    [[ -n "${GITHUB_PULL_REQUEST_NUMBER:-}" ]]; then
+    debug "Posting the Super-linter summary (${SUPER_LINTER_SUMMARY_OUTPUT_PATH}) as a pull request (number: ${GITHUB_PULL_REQUEST_NUMBER}) comment"
+    if ! CreateGitHubPullRequestSummaryComment "${SUPER_LINTER_SUMMARY_OUTPUT_PATH}" "${GITHUB_PULL_REQUEST_NUMBER}"; then
+      warn "Error while posting GitHub pull request comment."
     fi
   fi
 
@@ -575,6 +697,7 @@ UpdateLoopsForImage() {
       "RUST_2015"
       "RUST_2018"
       "RUST_2021"
+      "RUST_2024"
       "RUST_CLIPPY"
     )
 
@@ -608,9 +731,18 @@ cleanup() {
       rm -rf "${R_RULES_FILE_PATH_IN_ROOT}"
     fi
 
-    # Define this variable here so we can rely on it as soon as possible
-    local LOG_FILE_PATH="${GITHUB_WORKSPACE}/${LOG_FILE}"
-    debug "LOG_FILE_PATH: ${LOG_FILE_PATH}"
+    # Fall back in case Super-linter crashed before initializing LOG_FILE_PATH
+    if [[ ! -v LOG_FILE_PATH ]]; then
+      local LOG_FILE_PATH=""
+      if [[ -d "${GITHUB_WORKSPACE:-}" ]]; then
+        LOG_FILE_PATH="${GITHUB_WORKSPACE:-}/"
+      elif [[ -d "${DEFAULT_WORKSPACE:-}" ]]; then
+        LOG_FILE_PATH="${DEFAULT_WORKSPACE:-}/"
+      fi
+      LOG_FILE_PATH="${LOG_FILE_PATH}${LOG_FILE}"
+      debug "LOG_FILE_PATH is not defined. Falling back to ${LOG_FILE_PATH}"
+    fi
+
     if [ "${CREATE_LOG_FILE}" = "true" ]; then
       if [[ "${REMOVE_ANSI_COLOR_CODES_FROM_OUTPUT}" == "true" ]] &&
         ! RemoveAnsiColorCodesFromFile "${LOG_TEMP}"; then
@@ -665,11 +797,21 @@ info "This version of Super-linter includes the following tools:\n$(cat "${VERSI
 
 debug "Git safe directory: $(git config --system --get safe.directory)"
 
-#######################
-# Get GitHub Env Vars #
-#######################
-# Need to pull in all the GitHub variables
-# needed to connect back and update checks
+if ! InitializeGitHubWorkspace "${DEFAULT_WORKSPACE:-}"; then
+  fatal "Error while initializing the GITHUB_WORKSPACE variable"
+fi
+
+# Define log file path as soon as possible (so after initializing the
+# GITHUB_WORKSPACE variable) because the cleanup function depends on that
+LOG_FILE_PATH="${GITHUB_WORKSPACE}/${LOG_FILE}"
+export LOG_FILE_PATH
+debug "Super-linter log file path: ${LOG_FILE_PATH}"
+
+if ! InitializeDefaultBranch "${USE_FIND_ALGORITHM}" "${GITHUB_EVENT_PATH:-}" "${RUN_LOCAL}"; then
+  fatal "Error while initializing the DEFAULT_BRANCH variable"
+fi
+
+# Initialize GitHub environment variables
 GetGitHubVars
 
 ############################################
@@ -696,10 +838,11 @@ SUPER_LINTER_SUMMARY_OUTPUT_PATH="${SUPER_LINTER_MAIN_OUTPUT_DIRECTORY_PATH}/${S
 export SUPER_LINTER_SUMMARY_OUTPUT_PATH
 debug "Super-linter summary output path: ${SUPER_LINTER_SUMMARY_OUTPUT_PATH}"
 
-if [[ "${ENABLE_GITHUB_ACTIONS_STEP_SUMMARY}" == "true" ]] && [[ "${SAVE_SUPER_LINTER_SUMMARY}" == "false" ]]; then
-  debug "ENABLE_GITHUB_ACTIONS_STEP_SUMMARY is set to ${SAVE_SUPER_LINTER_SUMMARY}, but SAVE_SUPER_LINTER_SUMMARY is set to ${SAVE_SUPER_LINTER_SUMMARY}"
+if [[ ("${ENABLE_GITHUB_ACTIONS_STEP_SUMMARY}" == "true" || "${ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT}" == "true") ]] &&
+  [[ "${SAVE_SUPER_LINTER_SUMMARY}" == "false" ]]; then
+  warn "ENABLE_GITHUB_ACTIONS_STEP_SUMMARY is set to ${ENABLE_GITHUB_ACTIONS_STEP_SUMMARY}, ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT is set to ${ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT}, but SAVE_SUPER_LINTER_SUMMARY is set to ${SAVE_SUPER_LINTER_SUMMARY}. Set SAVE_SUPER_LINTER_SUMMARY to true if you set ENABLE_GITHUB_ACTIONS_STEP_SUMMARY or ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT to true."
   SAVE_SUPER_LINTER_SUMMARY="true"
-  debug "Set SAVE_SUPER_LINTER_SUMMARY to ${SAVE_SUPER_LINTER_SUMMARY} because we need to append its contents to ${GITHUB_STEP_SUMMARY} later"
+  debug "Setting SAVE_SUPER_LINTER_SUMMARY to ${SAVE_SUPER_LINTER_SUMMARY}"
 fi
 
 # Ensure that the main output directory and files exist because the user might not have created them
@@ -754,8 +897,10 @@ if [[ "${USE_FIND_ALGORITHM}" == "false" ]] || [[ "${IGNORE_GITIGNORED_FILES}" =
   # using Git to get the list of files to lint
   if [[ "${USE_FIND_ALGORITHM}" == "false" ]]; then
     debug "Validate the Git SHA and branch references"
-    ValidateGitShaReference
-    ValidateDefaultGitBranch
+    debug "Validating GITHUB_SHA: ${GITHUB_SHA:-"not set"}"
+    if ! ValidateGitShaReference "${GITHUB_SHA}"; then
+      fatal "Failed to validate GITHUB_SHA (${GITHUB_SHA:-"not set"})"
+    fi
   fi
 else
   debug "Skipped the validation of the local Git environment because we don't depend on it."
@@ -780,8 +925,8 @@ LinterRulesLocation
 ########################
 # Get the linter rules #
 ########################
+debug "Default rules location: ${DEFAULT_RULES_LOCATION}"
 for LANGUAGE in "${LANGUAGE_ARRAY[@]}"; do
-  debug "Loading rules for ${LANGUAGE}..."
   eval "GetLinterRules ${LANGUAGE} ${DEFAULT_RULES_LOCATION}"
 done
 
@@ -799,10 +944,30 @@ if ! ValidateCheckModeAndFixModeVariables; then
   fatal "Error while validating the configuration fix mode for linters that support that"
 fi
 
-#################################
-# Check for SSL cert and update #
-#################################
-CheckSSLCert
+# Check for SSL cert if necessary
+if ! InstallCaCert; then
+  fatal "Error while installing certificates"
+fi
+
+# Export GITHUB_TOKEN if needed
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  debug "GitHub Token environment variable (GITHUB_TOKEN) is set"
+
+  if [[ "${VALIDATE_GITHUB_ACTIONS_ZIZMOR}" == "true" ]]; then
+    if [[ -z "${GH_TOKEN:-}" ]]; then
+      debug "Initializing the GH_TOKEN for zizmor with the value of GITHUB_TOKEN"
+      GH_TOKEN="${GITHUB_TOKEN}"
+    else
+      debug "GH_TOKEN for zizmor is already initialized"
+    fi
+    export GH_TOKEN
+  fi
+
+  if [[ "${EXPORT_GITHUB_TOKEN}" == "true" ]]; then
+    debug "Exporting GITHUB_TOKEN"
+    export GITHUB_TOKEN
+  fi
+fi
 
 ###########################################
 # Build the list of files for each linter #
@@ -827,7 +992,7 @@ endGitHubActionsLogGroup "${SUPER_LINTER_INITIALIZATION_LOG_GROUP_TITLE}"
 ###############
 declare PARALLEL_RESULTS_FILE_PATH
 PARALLEL_RESULTS_FILE_PATH="${SUPER_LINTER_PRIVATE_OUTPUT_DIRECTORY_PATH}/super-linter-results.json"
-debug "PARALLEL_RESULTS_FILE_PATH: ${PARALLEL_RESULTS_FILE_PATH}"
+debug "PARALLEL_RESULTS_FILE_PATH when running linters: ${PARALLEL_RESULTS_FILE_PATH}"
 
 declare -i LINTING_MAX_PROCS
 LINTING_MAX_PROCS=$(nproc)
@@ -841,15 +1006,20 @@ if [[ "${FIX_MODE_ENABLED}" == "true" ]]; then
 fi
 
 declare -a PARALLEL_COMMAND
-PARALLEL_COMMAND=(parallel --will-cite --keep-order --max-procs "$((LINTING_MAX_PROCS))" --xargs --results "${PARALLEL_RESULTS_FILE_PATH}")
+PARALLEL_COMMAND=(parallel --will-cite --keep-order --max-procs "$((LINTING_MAX_PROCS))" --results "${PARALLEL_RESULTS_FILE_PATH}")
 
-# Run one LANGUAGE per process. Each of these processes will run more processees in parellel if supported
+# Run one LANGUAGE per process. Each of these processes will run more processes in parallel if supported
 PARALLEL_COMMAND+=(--max-lines 1)
 
 if [ "${LOG_DEBUG}" == "true" ]; then
-  debug "LOG_DEBUG is enabled. Enable verbose ouput for parallel"
-  PARALLEL_COMMAND+=(--verbose)
+  debug "LOG_DEBUG is enabled. Enable verbose output for parallel"
+  PARALLEL_COMMAND+=(-v --tag)
 fi
+
+# Disable saving the output to the Super-linter log file to avoid that output
+# shows as interleaved with output from other jobs running in parallel.
+# Post-processing logic after running GNU Parallel will print the logs
+PARALLEL_COMMAND+=(CREATE_LOG_FILE="false")
 
 PARALLEL_COMMAND+=("LintCodebase" "{}" "\"${TEST_CASE_RUN}\"")
 debug "PARALLEL_COMMAND: ${PARALLEL_COMMAND[*]}"
@@ -857,40 +1027,21 @@ debug "PARALLEL_COMMAND: ${PARALLEL_COMMAND[*]}"
 PARALLEL_COMMAND_OUTPUT=$(printf "%s\n" "${LANGUAGE_ARRAY[@]}" | "${PARALLEL_COMMAND[@]}" 2>&1)
 PARALLEL_COMMAND_RETURN_CODE=$?
 debug "PARALLEL_COMMAND_OUTPUT when running linters (exit code: ${PARALLEL_COMMAND_RETURN_CODE}):\n${PARALLEL_COMMAND_OUTPUT}"
-debug "Parallel output file (${PARALLEL_RESULTS_FILE_PATH}) contents when running linters:\n$(cat "${PARALLEL_RESULTS_FILE_PATH}")"
 
-RESULTS_OBJECT=
-if ! RESULTS_OBJECT=$(jq --raw-output -n '[inputs]' "${PARALLEL_RESULTS_FILE_PATH}"); then
-  fatal "Error loading results when building the file list: ${RESULTS_OBJECT}"
-fi
-debug "RESULTS_OBJECT when running linters:\n${RESULTS_OBJECT}"
-
-# Get raw output so we can strip quotes from the data we load. Also, strip the final newline to avoid adding it two times
-if ! STDOUT_LINTERS="$(jq --raw-output '.[] | select(.Stdout[:-1] | length > 0) | .Stdout[:-1]' <<<"${RESULTS_OBJECT}")"; then
-  fatal "Error when loading stdout when running linters:\n${STDOUT_LINTERS}"
-fi
-
-if [ -n "${STDOUT_LINTERS}" ]; then
-  info "Command output when running linters:\n------\n${STDOUT_LINTERS}\n------"
+if [[ -f "${PARALLEL_RESULTS_FILE_PATH}" ]]; then
+  debug "Contents of the Parallel results file (${PARALLEL_RESULTS_FILE_PATH}):\n$(cat "${PARALLEL_RESULTS_FILE_PATH}")"
 else
-  debug "Stdout when running linters is empty"
-fi
-
-if ! STDERR_LINTERS="$(jq --raw-output '.[] | select(.Stderr[:-1] | length > 0) | .Stderr[:-1]' <<<"${RESULTS_OBJECT}")"; then
-  fatal "Error when loading stderr for ${FILE_TYPE}:\n${STDERR_LINTERS}"
-fi
-
-if [ -n "${STDERR_LINTERS}" ]; then
-  info "Stderr when running linters:\n------\n${STDERR_LINTERS}\n------"
-else
-  debug "Stderr when running linters is empty"
+  debug "Parallel results file (${PARALLEL_RESULTS_FILE_PATH}) doesn't exist, or it's not readable"
 fi
 
 if [[ ${PARALLEL_COMMAND_RETURN_CODE} -ne 0 ]]; then
+  # When this happens, there's a failure that might have prevented running
+  # GNU parallel, so we print the output in case we didn't get to the point
+  # of processing stdout and stderr, and save them on files.
+  if [[ -f "${PARALLEL_RESULTS_FILE_PATH}" ]]; then
+    debug "Contents of the Parallel results file (${PARALLEL_RESULTS_FILE_PATH}):\n$(cat "${PARALLEL_RESULTS_FILE_PATH}")"
+  fi
   fatal "Error when running linters. Exit code: ${PARALLEL_COMMAND_RETURN_CODE}"
 fi
 
-##########
-# Footer #
-##########
 Footer

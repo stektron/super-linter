@@ -9,8 +9,11 @@ function ValidateBooleanConfigurationVariables() {
   ValidateBooleanVariable "ENABLE_COMMITLINT_STRICT_MODE" "${ENABLE_COMMITLINT_STRICT_MODE}"
   ValidateBooleanVariable "ENABLE_GITHUB_ACTIONS_GROUP_TITLE" "${ENABLE_GITHUB_ACTIONS_GROUP_TITLE}"
   ValidateBooleanVariable "ENABLE_GITHUB_ACTIONS_STEP_SUMMARY" "${ENABLE_GITHUB_ACTIONS_STEP_SUMMARY}"
+  ValidateBooleanVariable "ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT" "${ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT}"
   ValidateBooleanVariable "ENFORCE_COMMITLINT_CONFIGURATION_CHECK" "${ENFORCE_COMMITLINT_CONFIGURATION_CHECK}"
+  ValidateBooleanVariable "EXPORT_GITHUB_TOKEN" "${EXPORT_GITHUB_TOKEN}"
   ValidateBooleanVariable "FAIL_ON_CONFLICTING_TOOLS_ENABLED" "${FAIL_ON_CONFLICTING_TOOLS_ENABLED}"
+  ValidateBooleanVariable "FAIL_ON_INVALID_GITHUB_ACTIONS_EVENT_CONFIGURATION" "${FAIL_ON_INVALID_GITHUB_ACTIONS_EVENT_CONFIGURATION}"
   ValidateBooleanVariable "FIX_MODE_ENABLED" "${FIX_MODE_ENABLED}"
   ValidateBooleanVariable "FIX_MODE_TEST_CASE_RUN" "${FIX_MODE_TEST_CASE_RUN}"
   ValidateBooleanVariable "IGNORE_GENERATED_FILES" "${IGNORE_GENERATED_FILES}"
@@ -27,32 +30,62 @@ function ValidateBooleanConfigurationVariables() {
   ValidateBooleanVariable "SAVE_SUPER_LINTER_SUMMARY" "${SAVE_SUPER_LINTER_SUMMARY}"
   ValidateBooleanVariable "SSH_INSECURE_NO_VERIFY_GITHUB_KEY" "${SSH_INSECURE_NO_VERIFY_GITHUB_KEY}"
   ValidateBooleanVariable "SSH_SETUP_GITHUB" "${SSH_SETUP_GITHUB}"
+  ValidateBooleanVariable "STRIP_DEFAULT_WORKSPACE_FOR_REGEX" "${STRIP_DEFAULT_WORKSPACE_FOR_REGEX}"
   ValidateBooleanVariable "SUPPRESS_FILE_TYPE_WARN" "${SUPPRESS_FILE_TYPE_WARN}"
+  ValidateBooleanVariable "SUPPRESS_OUTPUT_ON_SUCCESS" "${SUPPRESS_OUTPUT_ON_SUCCESS}"
   ValidateBooleanVariable "SUPPRESS_POSSUM" "${SUPPRESS_POSSUM}"
   ValidateBooleanVariable "TEST_CASE_RUN" "${TEST_CASE_RUN}"
+  ValidateBooleanVariable "UPDATE_EXISTING_GITHUB_PULL_REQUEST_SUMMARY_COMMENT" "${UPDATE_EXISTING_GITHUB_PULL_REQUEST_SUMMARY_COMMENT}"
   ValidateBooleanVariable "USE_FIND_ALGORITHM" "${USE_FIND_ALGORITHM}"
   ValidateBooleanVariable "VALIDATE_ALL_CODEBASE" "${VALIDATE_ALL_CODEBASE}"
   ValidateBooleanVariable "YAML_ERROR_ON_WARNING" "${YAML_ERROR_ON_WARNING}"
 }
 
-function ValidateGitHubWorkspace() {
-  local GITHUB_WORKSPACE
-  GITHUB_WORKSPACE="${1}"
-  if [ -z "${GITHUB_WORKSPACE}" ]; then
-    fatal "Failed to get GITHUB_WORKSPACE: ${GITHUB_WORKSPACE}"
+InitializeGitHubWorkspace() {
+  local DEFAULT_WORKSPACE="${1}" && shift
+
+  debug "Initializing GITHUB_WORKSPACE. DEFAULT_WORKSPACE: ${DEFAULT_WORKSPACE:-"not set"}"
+
+  if [[ -z "${DEFAULT_WORKSPACE:-}" ]]; then
+    error "DEFAULT_WORKSPACE is not set."
+    return 1
+  fi
+
+  if [[ -z "${GITHUB_WORKSPACE:-}" ]]; then
+    GITHUB_WORKSPACE="${DEFAULT_WORKSPACE}"
   fi
 
   if [ ! -d "${GITHUB_WORKSPACE}" ]; then
-    fatal "The workspace (${GITHUB_WORKSPACE}) is not a directory!"
+    error "The workspace (${GITHUB_WORKSPACE}) is not a directory!"
+    return 1
   fi
-  info "Successfully validated GITHUB_WORKSPACE: ${GITHUB_WORKSPACE}"
+  debug "Successfully validated GITHUB_WORKSPACE: ${GITHUB_WORKSPACE}"
+
+  # Change the working directory to the workspace so we don't need to ask users
+  # to do this.
+  if ! pushd "${GITHUB_WORKSPACE}" >/dev/null; then
+    error "Error while changing the working directory to ${GITHUB_WORKSPACE:-"not set"}"
+    return 1
+  fi
+
+  # We need to export GITHUB_WORKSPACE so subprocesses can access the value
+  # of this variable (i.e. when running linters with GNU parallel)
+  export GITHUB_WORKSPACE
 }
 
 function ValidateFindMode() {
-  debug "Validating find mode. USE_FIND_ALGORITHM: ${USE_FIND_ALGORITHM}, VALIDATE_ALL_CODEBASE: ${VALIDATE_ALL_CODEBASE}"
-  if [[ "${USE_FIND_ALGORITHM}" == "true" ]] && [[ "${VALIDATE_ALL_CODEBASE}" == "false" ]]; then
-    error "Setting USE_FIND_ALGORITHM to true and VALIDATE_ALL_CODEBASE to false is not supported because super-linter relies on Git to validate changed files."
-    return 1
+  debug "Validating find mode. USE_FIND_ALGORITHM: ${USE_FIND_ALGORITHM}, VALIDATE_ALL_CODEBASE: ${VALIDATE_ALL_CODEBASE:-"not set"}, DEFAULT_BRANCH: ${DEFAULT_BRANCH:-"not set"}"
+  if [[ "${USE_FIND_ALGORITHM}" == "true" ]]; then
+
+    if [[ "${VALIDATE_ALL_CODEBASE}" == "false" ]]; then
+      error "Setting USE_FIND_ALGORITHM to ${USE_FIND_ALGORITHM} and VALIDATE_ALL_CODEBASE to ${VALIDATE_ALL_CODEBASE} is not supported because Super-linter relies on Git to validate changed files."
+      return 1
+    fi
+
+    if [[ -n "${DEFAULT_BRANCH:-}" ]]; then
+      error "Setting USE_FIND_ALGORITHM to ${USE_FIND_ALGORITHM} and DEFAULT_BRANCH to ${DEFAULT_BRANCH} is not supported because Super-linter doesn't consider the value DEFAULT_BRANCH when not using Git."
+      return 1
+    fi
   fi
 }
 
@@ -128,7 +161,7 @@ function ValidateValidationVariables() {
       if [ -z "${!VALIDATE_LANGUAGE:-}" ]; then
         # Flag was not set, default to:
         # - true if the configuration provided any false value -> enable linters that the user didn't explicitly disable
-        # - false if the configuration didn't provid any false value -> disable linters that the user didn't explicitly enable
+        # - false if the configuration didn't provide any false value -> disable linters that the user didn't explicitly enable
         eval "${VALIDATE_LANGUAGE}='$ANY_FALSE'"
       fi
     else
@@ -210,8 +243,13 @@ function CheckIfFixModeIsEnabled() {
 function CheckIfGitBranchExists() {
   local BRANCH_NAME="${1}"
   debug "Check if the ${BRANCH_NAME} branch exists in ${GITHUB_WORKSPACE}"
-  if ! git -C "${GITHUB_WORKSPACE}" rev-parse --quiet --verify "${BRANCH_NAME}"; then
+  local RET_CODE
+  local GIT_BRANCH_CHECK_OUTPUT
+  GIT_BRANCH_CHECK_OUTPUT="$(git -C "${GITHUB_WORKSPACE}" rev-parse --quiet --verify "${BRANCH_NAME}")"
+  RET_CODE=$?
+  if [[ "${RET_CODE}" -gt 0 ]]; then
     info "The ${BRANCH_NAME} branch doesn't exist in ${GITHUB_WORKSPACE}"
+    debug "Git branch check output: ${GIT_BRANCH_CHECK_OUTPUT}"
     return 1
   else
     debug "The ${BRANCH_NAME} branch exists in ${GITHUB_WORKSPACE}"
@@ -242,7 +280,25 @@ function ValidateLocalGitRepository() {
     debug "${GITHUB_WORKSPACE} is a Git repository"
   fi
 
-  debug "Git branches: $(git -C "${GITHUB_WORKSPACE}" branch -a)"
+  debug "Git branches:\n$(git -C "${GITHUB_WORKSPACE}" branch -a)"
+
+  # Get an "anonymized" (no commit information) Git log graph limited to the
+  # last few commits in order to get debug information
+  GIT_LOG_GRAPH=$(
+    git -C "${GITHUB_WORKSPACE}" --no-pager log \
+      --all \
+      --decorate \
+      --graph \
+      --pretty=format:"%Cred%h%Creset%C(yellow)%d%Creset" \
+      -30
+  )
+  RET_CODE=$?
+  if [[ "${RET_CODE}" -gt 0 ]]; then
+    # Don't block on this error
+    error "Cannot load the Git repository graph: ${GIT_LOG_GRAPH}"
+  else
+    debug "Git repository graph:\n${GIT_LOG_GRAPH}"
+  fi
 }
 
 function CheckIfGitRefExists() {
@@ -265,101 +321,37 @@ function IsUnsignedInteger() {
   esac
 }
 
-function ValidateGitShaReference() {
-  debug "Git HEAD: $(git -C "${GITHUB_WORKSPACE}" show HEAD --stat)"
+InitializeDefaultBranch() {
+  local -l USE_FIND_ALGORITHM="${1}" && shift
+  local GITHUB_EVENT_FILE_PATH="${1}" && shift
+  local -l RUN_LOCAL="${1}" && shift
 
-  debug "Validate that the GITHUB_SHA reference (${GITHUB_SHA}) exists in this Git repository."
-  if ! CheckIfGitRefExists "${GITHUB_SHA}"; then
-    IssueHintForFullGitHistory
-    fatal "The GITHUB_SHA reference (${GITHUB_SHA}) doesn't exist in this Git repository"
-  else
-    debug "The GITHUB_SHA reference (${GITHUB_SHA}) exists in this repository"
-  fi
-}
-
-InitializeAndValidateGitBeforeShaReference() {
-  debug "Initializing and validating GITHUB_BEFORE_SHA"
-  debug "Check if the ${GITHUB_SHA} commit is a merge commit by checking if it has more than one parent"
-
-  local GITHUB_SHA="${1}"
-  local -i GITHUB_EVENT_COMMIT_COUNT="${2}"
-  local GIT_ROOT_COMMIT_SHA="${3}"
-
-  if [[ "${GITHUB_SHA}" == "${GIT_ROOT_COMMIT_SHA}" ]]; then
-    debug "${GITHUB_SHA} is the initial commit. Skip initializing GITHUB_BEFORE_SHA because there cannot be any commit before the initial commit"
+  if [[ "${USE_FIND_ALGORITHM}" == "true" ]]; then
+    debug "Skip DEFAULT_BRANCH initialization because USE_FIND_ALGORITHM is set to ${USE_FIND_ALGORITHM}"
     return 0
   fi
-  debug "${GITHUB_SHA} is not the initial commit. Initializing and validating GITHUB_BEFORE_SHA"
 
-  local -i GIT_COMMIT_PARENTS_COUNT
-  GIT_COMMIT_PARENTS_COUNT="$(git -C "${GITHUB_WORKSPACE}" rev-list --parents -n 1 "${GITHUB_SHA}" | wc -w)"
-  local RET_CODE=$?
-  if [[ "${RET_CODE}" -gt 0 ]]; then
-    fatal "Error while getting ${GITHUB_SHA} commit parents count. Output: ${GIT_COMMIT_PARENTS_COUNT}"
-  fi
-  debug "${GITHUB_SHA} git commit parents count (GIT_COMMIT_PARENTS_COUNT): ${GIT_COMMIT_PARENTS_COUNT}"
-  GIT_COMMIT_PARENTS_COUNT=$((GIT_COMMIT_PARENTS_COUNT - 1))
-  debug "Subtract 1 from GIT_COMMIT_PARENTS_COUNT to get the actual number of merge parents because the count includes the ${GITHUB_SHA} commit itself. GIT_COMMIT_PARENTS_COUNT: ${GIT_COMMIT_PARENTS_COUNT}"
+  local GITHUB_REPOSITORY_DEFAULT_BRANCH
 
-  # Ref: https://git-scm.com/docs/git-rev-parse#Documentation/git-rev-parse.txt
-  # Use GITHUB_SHA instead of HEAD because for pull requests, HEAD points that the PR merge commit
-  local GIT_BEFORE_SHA_HEAD="${GITHUB_SHA}"
-  if [ ${GIT_COMMIT_PARENTS_COUNT} -gt 1 ]; then
-    debug "${GITHUB_SHA} is a merge commit because it has more than one parent."
-    GIT_BEFORE_SHA_HEAD="${GIT_BEFORE_SHA_HEAD}^2"
-    debug "Add the suffix to GIT_BEFORE_SHA_HEAD to get the second parent of the merge commit: ${GIT_BEFORE_SHA_HEAD}"
-
-    if [ ${GITHUB_EVENT_COMMIT_COUNT} -gt 0 ]; then
-      GITHUB_EVENT_COMMIT_COUNT=$((GITHUB_EVENT_COMMIT_COUNT - 1))
-      debug "Remove one commit from GITHUB_EVENT_COMMIT_COUNT to account for the merge commit. GITHUB_EVENT_COMMIT_COUNT: ${GITHUB_EVENT_COMMIT_COUNT}"
-    else
-      debug "Don't subtract one commit from GITHUB_EVENT_COMMIT_COUNT to account for the merge commit because there were no commits pushed. GITHUB_EVENT_COMMIT_COUNT: ${GITHUB_EVENT_COMMIT_COUNT}"
+  if [[ "${RUN_LOCAL}" == "true" ]]; then
+    GITHUB_REPOSITORY_DEFAULT_BRANCH="master"
+  else
+    GITHUB_REPOSITORY_DEFAULT_BRANCH="$(GetGithubRepositoryDefaultBranch "${GITHUB_EVENT_FILE_PATH}")"
+    local RET_CODE=$?
+    if [[ "${RET_CODE}" -gt 0 ]]; then
+      error "Failed to get GITHUB_REPOSITORY_DEFAULT_BRANCH. Output: ${GITHUB_REPOSITORY_DEFAULT_BRANCH}"
+      return 1
     fi
-  else
-    debug "${GITHUB_SHA} is not a merge commit because it has a single parent. No need to add the parent identifier (^) to the revision indicator because it's implicitly set to ^1 when there's only one parent."
+    debug "Successfully detected the default branch for this repository: ${GITHUB_REPOSITORY_DEFAULT_BRANCH}"
   fi
 
-  GIT_BEFORE_SHA_HEAD="${GIT_BEFORE_SHA_HEAD}~${GITHUB_EVENT_COMMIT_COUNT}"
-  debug "GIT_BEFORE_SHA_HEAD: ${GIT_BEFORE_SHA_HEAD}"
+  DEFAULT_BRANCH="${DEFAULT_BRANCH:-"${GITHUB_REPOSITORY_DEFAULT_BRANCH}"}"
 
-  # shellcheck disable=SC2086  # We checked that GITHUB_EVENT_COMMIT_COUNT is an integer
-  GITHUB_BEFORE_SHA="$(git -C "${GITHUB_WORKSPACE}" rev-parse ${GIT_BEFORE_SHA_HEAD})"
-  local RET_CODE=$?
-  if [[ "${RET_CODE}" -gt 0 ]]; then
-    fatal "Failed to initialize GITHUB_BEFORE_SHA for a ${GITHUB_EVENT_NAME} event. Output: ${GITHUB_BEFORE_SHA}"
+  if [[ "${DEFAULT_BRANCH}" != "${GITHUB_REPOSITORY_DEFAULT_BRANCH}" ]]; then
+    debug "The default branch for this repository was set to ${GITHUB_REPOSITORY_DEFAULT_BRANCH}, but it was explicitly overridden using the DEFAULT_BRANCH variable, and set to: ${DEFAULT_BRANCH}"
   fi
+  info "The default branch for this repository is set to: ${DEFAULT_BRANCH}"
 
-  debug "Validating GITHUB_BEFORE_SHA: ${GITHUB_BEFORE_SHA}"
-  if [ -z "${GITHUB_BEFORE_SHA:-}" ] ||
-    [ "${GITHUB_BEFORE_SHA:-}" == "null" ] ||
-    [ "${GITHUB_BEFORE_SHA:-}" == "0000000000000000000000000000000000000000" ]; then
-    fatal "Failed to get GITHUB_BEFORE_SHA: [${GITHUB_BEFORE_SHA:-}]"
-  fi
-
-  debug "Validate that the GITHUB_BEFORE_SHA reference (${GITHUB_BEFORE_SHA}) exists in this Git repository."
-  if ! CheckIfGitRefExists "${GITHUB_BEFORE_SHA}"; then
-    fatal "The GITHUB_BEFORE_SHA reference (${GITHUB_BEFORE_SHA}) doesn't exist in this Git repository"
-  else
-    debug "The GITHUB_BEFORE_SHA reference (${GITHUB_BEFORE_SHA}) exists in this repository"
-  fi
-
-  debug "Successfully found GITHUB_BEFORE_SHA: ${GITHUB_BEFORE_SHA}"
-  export GITHUB_BEFORE_SHA
-}
-
-InitializeRootCommitSha() {
-  GIT_ROOT_COMMIT_SHA="$(git -C "${GITHUB_WORKSPACE}" rev-list --max-parents=0 "${GITHUB_SHA}")"
-  local RET_CODE=$?
-  if [[ "${RET_CODE}" -gt 0 ]]; then
-    error "Failed to get the root commit: ${GIT_ROOT_COMMIT_SHA}"
-    return 1
-  else
-    debug "Successfully found the root commit: ${GIT_ROOT_COMMIT_SHA}"
-  fi
-  export GIT_ROOT_COMMIT_SHA
-}
-
-function ValidateDefaultGitBranch() {
   debug "Check if the default branch (${DEFAULT_BRANCH}) exists"
   if ! CheckIfGitBranchExists "${DEFAULT_BRANCH}"; then
     REMOTE_DEFAULT_BRANCH="origin/${DEFAULT_BRANCH}"
@@ -374,6 +366,159 @@ function ValidateDefaultGitBranch() {
   else
     debug "The default branch (${DEFAULT_BRANCH}) exists in this repository"
   fi
+}
+
+InitializeGitBeforeShaReference() {
+  debug "Initializing and validating GITHUB_BEFORE_SHA"
+
+  local GITHUB_SHA="${1}"
+  local GIT_ROOT_COMMIT_SHA="${2}"
+  local GITHUB_EVENT_NAME="${3}"
+  local DEFAULT_BRANCH="${4:-}"
+  local FORCE_PUSH_EVENT="${5:-}"
+  local GITHUB_EVENT_PUSH_BEFORE="${6:-}"
+  local GITHUB_EVENT_FIRST_PUSHED_COMMIT="${7:-}"
+
+  debug "Initializing and validating GITHUB_BEFORE_SHA for a ${GITHUB_EVENT_NAME} event. GITHUB_SHA: ${GITHUB_SHA}"
+
+  local GIT_BEFORE_SHA_HEAD
+
+  if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+
+    if ! ValidateBooleanVariable "FORCE_PUSH_EVENT" "${FORCE_PUSH_EVENT}"; then
+      error "Error while validating FORCE_PUSH_EVENT: ${FORCE_PUSH_EVENT:-"not set"}"
+      return 1
+    fi
+
+    if [[ -z "${GITHUB_EVENT_PUSH_BEFORE:-}" ]]; then
+      error "GITHUB_EVENT_PUSH_BEFORE is not set or it's empty."
+      return 1
+    fi
+
+    if [[ -z "${GITHUB_EVENT_FIRST_PUSHED_COMMIT:-}" ]]; then
+      error "GITHUB_EVENT_FIRST_PUSHED_COMMIT is not set or it's empty."
+      return 1
+    fi
+
+    debug "FORCE_PUSH_EVENT: ${FORCE_PUSH_EVENT}"
+    debug "GITHUB_EVENT_PUSH_BEFORE: ${GITHUB_EVENT_PUSH_BEFORE}"
+    debug "GITHUB_EVENT_FIRST_PUSHED_COMMIT: ${GITHUB_EVENT_FIRST_PUSHED_COMMIT}"
+    # If this is NOT a force push event and not the initial commit (in this,
+    # case, the before field is set to all zeroes), rely on what GitHub believes
+    # to be the status before the push.
+    if [[ "${FORCE_PUSH_EVENT}" == "false" ]] &&
+      [[ ("${GITHUB_EVENT_PUSH_BEFORE}" != "${GITHUB_SHA_ALL_ZEROES}" && "${GITHUB_EVENT_PUSH_BEFORE}" != "null") ]]; then
+      debug "This is NOT a force push event, neither the user pushed the initial commit, nor created an empty ref."
+      GIT_BEFORE_SHA_HEAD="${GITHUB_EVENT_PUSH_BEFORE}"
+    else
+      debug "This is a force push event, or the user pushed the initial commit, or it's a push triggered by the merge queue"
+
+      # If GITHUB_EVENT_FIRST_PUSHED_COMMIT is
+      # ${GITHUB_PUSH_NO_COMMITS_PUSHED_RETURN_VALUE}, assume that the user
+      # created a new branch and pushed the branch ref without pushing any new
+      # commit
+      if [[ "${GITHUB_EVENT_FIRST_PUSHED_COMMIT}" == "${GITHUB_PUSH_NO_COMMITS_PUSHED_RETURN_VALUE}" ]]; then
+        debug "Assuming that no commits were pushed"
+        # The user didn't push any commit, so GITHUB_BEFORE_SHA should be the
+        # same as GITHUB_SHA because there are no new commits pushed, so no
+        # differences.
+        GIT_BEFORE_SHA_HEAD="${GITHUB_SHA}"
+      else
+        debug "The push event contains commits"
+        if [[ "${GITHUB_EVENT_FIRST_PUSHED_COMMIT}" == "${GIT_ROOT_COMMIT_SHA}" ]]; then
+          debug "The first commit of the push event is the root commit"
+          # Set GIT_BEFORE_SHA_HEAD to the empty tree hash because there's no
+          # commit before the root commit
+          GIT_BEFORE_SHA_HEAD="${GIT_EMPTY_TREE_HASH}"
+          debug "Setting GIT_BEFORE_SHA_HEAD to the empty tree hash: ${GIT_BEFORE_SHA_HEAD}"
+        else
+          debug "The first commit of the push event is NOT the root commit"
+          GIT_BEFORE_SHA_HEAD="${GITHUB_EVENT_FIRST_PUSHED_COMMIT}^1"
+        fi
+      fi
+    fi
+  elif [[ "${GITHUB_EVENT_NAME}" == "merge_group" ]] ||
+    [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]] ||
+    [[ "${GITHUB_EVENT_NAME}" == "pull_request_target" ]] ||
+    [[ "${GITHUB_EVENT_NAME}" == "repository_dispatch" ]] ||
+    [[ "${GITHUB_EVENT_NAME}" == "schedule" ]] ||
+    [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+    local GIT_MERGE_BASE
+    if ! GIT_MERGE_BASE="$(git -C "${GITHUB_WORKSPACE}" merge-base "${DEFAULT_BRANCH}" "${GITHUB_SHA}" 2>&1)"; then
+      error "Error while calculating GIT_MERGE_BASE: ${GIT_MERGE_BASE}"
+      return 1
+    fi
+    debug "GIT_MERGE_BASE for ${GITHUB_EVENT_NAME}: ${GIT_MERGE_BASE}"
+    GIT_BEFORE_SHA_HEAD="${GIT_MERGE_BASE}"
+  else
+    error "GitHub event not supported: ${GITHUB_EVENT_NAME}. Create a new issue in the Super-linter repository so the developers can look into this."
+    return 1
+  fi
+
+  debug "GIT_BEFORE_SHA_HEAD: ${GIT_BEFORE_SHA_HEAD}"
+  GITHUB_BEFORE_SHA="$(git -C "${GITHUB_WORKSPACE}" rev-parse "${GIT_BEFORE_SHA_HEAD}" 2>&1)"
+  local RET_CODE=$?
+  if [[ "${RET_CODE}" -gt 0 ]]; then
+    error "Failed to initialize GITHUB_BEFORE_SHA for a ${GITHUB_EVENT_NAME} event. Output: ${GITHUB_BEFORE_SHA}"
+    return 1
+  fi
+
+  debug "Validating GITHUB_BEFORE_SHA: ${GITHUB_BEFORE_SHA:-"not set"}"
+  if ! ValidateGitShaReference "${GITHUB_BEFORE_SHA}"; then
+    error "Failed to validate GITHUB_BEFORE_SHA (${GITHUB_BEFORE_SHA:-"not set"})"
+    return 1
+  fi
+
+  export GITHUB_BEFORE_SHA
+}
+
+ValidateGitShaReference() {
+  local SHA_REFERENCE="${1}"
+  debug "Validating SHA_REFERENCE: ${SHA_REFERENCE}"
+  if [ -z "${SHA_REFERENCE:-}" ] ||
+    [ "${SHA_REFERENCE:-}" == "null" ] ||
+    [ "${SHA_REFERENCE:-}" == "${GITHUB_SHA_ALL_ZEROES}" ]; then
+    error "Failed to get SHA_REFERENCE: ${SHA_REFERENCE:-}"
+    return 1
+  fi
+
+  debug "Validate that the SHA_REFERENCE reference (${SHA_REFERENCE}) exists in this Git repository."
+  if ! CheckIfGitRefExists "${SHA_REFERENCE}"; then
+    IssueHintForFullGitHistory
+    error "The SHA_REFERENCE reference (${SHA_REFERENCE}) doesn't exist in this Git repository"
+    return 1
+  else
+    debug "The SHA_REFERENCE reference (${SHA_REFERENCE}) exists in this repository"
+  fi
+
+  debug "Successfully validated SHA_REFERENCE: ${SHA_REFERENCE}"
+}
+
+ValidateGitHubEvent() {
+  local GITHUB_EVENT_NAME="${1}" && shift
+  local VALIDATE_ALL_CODEBASE="${1}" && shift
+  debug "Validating Super-linter configuration for specific GitHub events"
+
+  if [[ "${GITHUB_EVENT_NAME:-"GITHUB_EVENT_NAME not set"}" == "pull_request_target" ]] ||
+    [[ "${GITHUB_EVENT_NAME:-"GITHUB_EVENT_NAME not set"}" == "schedule" ]] ||
+    [[ "${GITHUB_EVENT_NAME:-"GITHUB_EVENT_NAME not set"}" == "workflow_dispatch" ]]; then
+    if [[ "${VALIDATE_ALL_CODEBASE:-"VALIDATE_ALL_CODEBASE not set"}" == "false" ]]; then
+      warn "${GITHUB_EVENT_NAME} sets GITHUB_SHA as the last commit on the default branch, and GITHUB_REF to the default branch. When triggering ${GITHUB_EVENT_NAME} events, we recommend that you set VALIDATE_ALL_CODEBASE to true, otherwise Super-linter will not find any file to check."
+      return 1
+    fi
+  fi
+}
+
+InitializeRootCommitSha() {
+  GIT_ROOT_COMMIT_SHA="$(git -C "${GITHUB_WORKSPACE}" rev-list --max-parents=0 "${GITHUB_SHA}")"
+  local RET_CODE=$?
+  if [[ "${RET_CODE}" -gt 0 ]]; then
+    error "Failed to get the root commit: ${GIT_ROOT_COMMIT_SHA}"
+    return 1
+  else
+    debug "Successfully found the root commit: ${GIT_ROOT_COMMIT_SHA}"
+  fi
+  export GIT_ROOT_COMMIT_SHA
 }
 
 function CheckovConfigurationFileContainsDirectoryOption() {
@@ -400,6 +545,7 @@ function ValidateGitHubUrls() {
     error "DEFAULT_GITHUB_DOMAIN is empty."
     return 1
   fi
+
   debug "Default GitHub domain: ${DEFAULT_GITHUB_DOMAIN}"
 
   if [[ -z "${GITHUB_DOMAIN:-}" ]]; then
@@ -441,7 +587,7 @@ function ValidateSuperLinterSummaryOutputPath() {
     error "SUPER_LINTER_SUMMARY_OUTPUT_PATH (${SUPER_LINTER_SUMMARY_OUTPUT_PATH}) is not a file."
     return 1
   fi
-  debug "Super-linter summary ouput path passed validation"
+  debug "Super-linter summary output path passed validation"
 }
 
 ValidateCommitlintConfiguration() {
@@ -455,7 +601,7 @@ ValidateCommitlintConfiguration() {
     COMMITLINT_VERSION_CHECK_OUTPUT="$(commitlint --cwd "${GITHUB_WORKSPACE}" --last)"
     local COMMITLINT_EXIT_CODE=$?
     debug "Commitlint configuration check output:\n${COMMITLINT_VERSION_CHECK_OUTPUT}"
-    # Commitlint exits with 9 if no configuration file is avaialble.
+    # Commitlint exits with 9 if no configuration file is available.
     # Ref: https://github.com/conventional-changelog/commitlint/pull/4143
     # Ref: https://commitlint.js.org/reference/cli.html
     # Set this here so we can reuse this variable for tests
@@ -588,16 +734,35 @@ function ValidateDeprecatedVariables() {
   WarnIfVariableIsSet "${FIX_JAVASCRIPT_STANDARD:-}" "FIX_JAVASCRIPT_STANDARD"
   WarnIfVariableIsSet "${FIX_PYTHON_PYINK:-}" "FIX_PYTHON_PYINK"
   WarnIfVariableIsSet "${FIX_TYPESCRIPT_STANDARD:-}" "FIX_TYPESCRIPT_STANDARD"
-  WarnIfVariableIsSet "${KUBERNETES_KUBECONFORM_OPTIONS:-}" "KUBERNETES_KUBECONFORM_OPTIONS"
   WarnIfVariableIsSet "${PYTHON_PYINK_CONFIG_FILE:-}" "PYTHON_PYINK_CONFIG_FILE"
   WarnIfVariableIsSet "${TYPESCRIPT_STANDARD_TSCONFIG_FILE:-}" "TYPESCRIPT_STANDARD_TSCONFIG_FILE"
   WarnIfVariableIsSet "${VALIDATE_GHERKIN:-}" "VALIDATE_GHERKIN"
   WarnIfVariableIsSet "${VALIDATE_JAVASCRIPT_STANDARD:-}" "VALIDATE_JAVASCRIPT_STANDARD"
-  WarnIfVariableIsSet "${VALIDATE_KUBERNETES_KUBECONFORM:-}" "VALIDATE_KUBERNETES_KUBECONFORM"
   WarnIfVariableIsSet "${VALIDATE_PYTHON_PYINK:-}" "VALIDATE_PYTHON_PYINK"
   WarnIfVariableIsSet "${VALIDATE_RAKU:-}" "VALIDATE_RAKU"
   WarnIfVariableIsSet "${VALIDATE_TEKTON:-}" "VALIDATE_TEKTON"
   WarnIfVariableIsSet "${VALIDATE_TYPESCRIPT_STANDARD:-}" "VALIDATE_TYPESCRIPT_STANDARD"
+
+  # The following variables have been deprecated in v8.4.0
+  WarnIfVariableIsSet "${TERRAFORM_TERRASCAN_CONFIG_FILE:-}" "TERRAFORM_TERRASCAN_CONFIG_FILE"
+  WarnIfVariableIsSet "${VALIDATE_TERRAFORM_TERRASCAN:-}" "VALIDATE_TERRAFORM_TERRASCAN"
+
+  # The following variables have been deprecated in v8.6.0
+  WarnIfVariableIsSet "${FIX_JUPYTER_NBQA_BLACK:-}" "FIX_JUPYTER_NBQA_BLACK"
+  WarnIfVariableIsSet "${FIX_JUPYTER_NBQA_ISORT:-}" "FIX_JUPYTER_NBQA_ISORT"
+  WarnIfVariableIsSet "${FIX_JUPYTER_NBQA_RUFF:-}" "FIX_JUPYTER_NBQA_RUFF"
+  WarnIfVariableIsSet "${JUPYTER_NBQA_BLACK_CONFIG_FILE:-}" "JUPYTER_NBQA_BLACK_CONFIG_FILE"
+  WarnIfVariableIsSet "${JUPYTER_NBQA_FLAKE8_CONFIG_FILE:-}" "JUPYTER_NBQA_FLAKE8_CONFIG_FILE"
+  WarnIfVariableIsSet "${JUPYTER_NBQA_ISORT_CONFIG_FILE:-}" "JUPYTER_NBQA_ISORT_CONFIG_FILE"
+  WarnIfVariableIsSet "${JUPYTER_NBQA_MYPY_CONFIG_FILE:-}" "JUPYTER_NBQA_MYPY_CONFIG_FILE"
+  WarnIfVariableIsSet "${JUPYTER_NBQA_PYLINT_CONFIG_FILE:-}" "JUPYTER_NBQA_PYLINT_CONFIG_FILE"
+  WarnIfVariableIsSet "${JUPYTER_NBQA_RUFF_CONFIG_FILE:-}" "JUPYTER_NBQA_RUFF_CONFIG_FILE"
+  WarnIfVariableIsSet "${VALIDATE_JUPYTER_NBQA_BLACK:-}" "VALIDATE_JUPYTER_NBQA_BLACK"
+  WarnIfVariableIsSet "${VALIDATE_JUPYTER_NBQA_FLAKE8:-}" "VALIDATE_JUPYTER_NBQA_FLAKE8"
+  WarnIfVariableIsSet "${VALIDATE_JUPYTER_NBQA_ISORT:-}" "VALIDATE_JUPYTER_NBQA_ISORT"
+  WarnIfVariableIsSet "${VALIDATE_JUPYTER_NBQA_MYPY:-}" "VALIDATE_JUPYTER_NBQA_MYPY"
+  WarnIfVariableIsSet "${VALIDATE_JUPYTER_NBQA_PYLINT:-}" "VALIDATE_JUPYTER_NBQA_PYLINT"
+  WarnIfVariableIsSet "${VALIDATE_JUPYTER_NBQA_RUFF:-}" "VALIDATE_JUPYTER_NBQA_RUFF"
 }
 
 ValidateDeprecatedConfigurationFiles() {
@@ -609,4 +774,91 @@ ValidateDeprecatedConfigurationFiles() {
 
 ValidateConflictingTools() {
   debug "Validating if potentially conflicting tools are enabled"
+
+  local -l CONFLICT_FOUND="false"
+
+  if [[ "${VALIDATE_PYTHON_BLACK:-}" == "true" ]] && [[ "${VALIDATE_PYTHON_RUFF_FORMAT:-}" == "true" ]]; then
+    warn "Black and Ruff are both enabled, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+    CONFLICT_FOUND="true"
+  fi
+
+  if [[ "${VALIDATE_BIOME_FORMAT:-}" == "true" ]]; then
+    if [[ "${VALIDATE_CSS_PRETTIER:-}" == "true" ]]; then
+      warn "Biome format and Prettier are both enabled for CSS, SCSS, and SASS files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+    if [[ "${VALIDATE_GRAPHQL_PRETTIER:-}" == "true" ]]; then
+      warn "Biome format and Prettier are both enabled for GraphQL files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+    if [[ "${VALIDATE_HTML_PRETTIER:-}" == "true" ]]; then
+      warn "Biome format and Prettier are both enabled for HTML files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+    if [[ "${VALIDATE_JAVASCRIPT_PRETTIER:-}" == "true" ]]; then
+      warn "Biome format and Prettier are both enabled for JavaScript files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+    if [[ "${VALIDATE_JSON_PRETTIER:-}" == "true" ]]; then
+      warn "Biome format and Prettier are both enabled for JSON files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+    if [[ "${VALIDATE_JSONC_PRETTIER:-}" == "true" ]]; then
+      warn "Biome format and Prettier are both enabled for JSONC and JSON5 files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+    if [[ "${VALIDATE_JSX_PRETTIER:-}" == "true" ]]; then
+      warn "Biome format and Prettier are both enabled for JSX files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+    if [[ "${VALIDATE_TYPESCRIPT_PRETTIER:-}" == "true" ]]; then
+      warn "Biome format and Prettier are both enabled for TypeScript files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+    if [[ "${VALIDATE_VUE_PRETTIER:-}" == "true" ]]; then
+      warn "Biome format and Prettier are both enabled for Vue files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+  fi
+
+  if [[ "${VALIDATE_BIOME_LINT:-}" == "true" ]]; then
+    if [[ "${VALIDATE_CSS:-}" == "true" ]]; then
+      warn "Biome lint and Stylelint are both enabled for CSS, SCSS, and SASS files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+    if [[ "${VALIDATE_JAVASCRIPT_ES:-}" == "true" ]]; then
+      warn "Biome lint and ESLint are both enabled for JavaScript files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+    if [[ "${VALIDATE_JSON:-}" == "true" ]]; then
+      warn "Biome lint and ESLint are both enabled for JSON files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+    if [[ "${VALIDATE_JSONC:-}" == "true" ]]; then
+      warn "Biome lint and ESLint are both enabled for JSONC and JSON5 files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+    if [[ "${VALIDATE_JSX:-}" == "true" ]]; then
+      warn "Biome lint and ESLint are both enabled for JSX files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+    if [[ "${VALIDATE_TSX:-}" == "true" ]]; then
+      warn "Biome lint and ESLint are both enabled for TSX files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+    if [[ "${VALIDATE_TYPESCRIPT_ES:-}" == "true" ]]; then
+      warn "Biome lint and ESLint are both enabled for TypeScript files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+    if [[ "${VALIDATE_VUE:-}" == "true" ]]; then
+      warn "Biome lint and ESLint are both enabled for Vue files, and might conflict with each other. To avoid potential conflicts, keep only one of the two enabled, and disable the other."
+      CONFLICT_FOUND="true"
+    fi
+  fi
+
+  ValidateBooleanVariable "CONFLICT_FOUND" "${CONFLICT_FOUND}"
+
+  if [[ "${CONFLICT_FOUND}" == "true" ]]; then
+    return 1
+  fi
 }

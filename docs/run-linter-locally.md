@@ -37,6 +37,58 @@ Notes:
 - You can add as many configuration options as needed. Configuration options are
   documented in the [readme](../README.md#configure-super-linter).
 
+### Working with Git Worktrees
+
+Git worktrees allow you to have multiple working directories associated with a
+single Git repository, which is useful for working on different branches
+simultaneously without switching contexts.
+
+When running super-linter in a Git worktree, you must mount both the worktree
+directory and the main Git repository directory into the container. This is
+because worktrees store only the working files, while Git metadata remains in
+the main repository's `.git` directory.
+
+#### Example Docker Command for Git Worktrees
+
+```bash
+docker run \
+  -e LOG_LEVEL=DEBUG \
+  -e RUN_LOCAL=true \
+  -v /path/to/your/worktree:/tmp/lint \
+  -v /path/to/main/repo/.git:/path/to/main/repo/.git \
+  --rm \
+  ghcr.io/super-linter/super-linter:latest
+```
+
+#### Finding Your Git Common Directory
+
+To find the main Git directory that needs to be mounted, use the following Git
+command from within your worktree:
+
+```bash
+git rev-parse --path-format=absolute --git-common-dir
+```
+
+This will output the absolute path to the main Git directory, for example:
+
+```bash
+/path/to/main/repo/.git
+```
+
+Use this output as the source path for your Docker volume mount.
+
+#### Helpful Error Messages
+
+If you forget to mount the main Git directory, super-linter will detect this and
+provide a helpful error message indicating exactly which directory needs to be
+mounted:
+
+```text
+/path/to/main/repo/.git/worktrees/my-worktree doesn't exist.
+Ensure to mount it as a volume when running the Super-linter container.
+See https://github.com/super-linter/super-linter/blob/main/docs/run-linter-locally.md
+```
+
 ### GitLab
 
 To run Super-linter in your GitLab CI/CD pipeline, You can use the following
@@ -69,7 +121,7 @@ This repository provides a DevContainer for
 ## Share Environment variables between environments
 
 To avoid duplication if you run super-linter both locally and in other
-environements, such as CI, you can define configuration options once, and load
+environments, such as CI, you can define configuration options once, and load
 them accordingly:
 
 1. Create a configuration file for super-linter `super-linter.env`. For example:
@@ -101,71 +153,3 @@ them accordingly:
      # Ref: https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/workflow-commands-for-github-actions#setting-an-environment-variable
      run: grep -v '^#' .github/super-linter.env >> "$GITHUB_ENV"
    ```
-
-## Build the container image and run the test suite locally
-
-To run the build and test process locally, in the top-level super-linter
-directory, do the following:
-
-1. [Create a fine-grained GitHub personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token).
-   The token only needs to have public/read-only access.
-
-1. Store the generated personal access token in a file in the top-level
-   directory (This file is ignored by Git).
-
-   ```bash
-   echo "github_pat_XXXXXX_XXXXXX" > .github-personal-access-token
-   ```
-
-1. Run the build process:
-
-   ```bash
-   . ./scripts/build-metadata.sh && make
-   ```
-
-To avoid invalidating the build cache because of changing values of build
-arguments, you can set build arguments to arbitrary values before running
-`make`, instead of sourcing `scripts/build-metadata.sh`:
-
-```bash
-BUILD_DATE=2023-12-12T09:32:05Z \
-BUILD_REVISION=83c16f63caa9d432df4519efb4c58a56e2190bd6 \
-BUILD_VERSION=83c16f63caa9d432df4519efb4c58a56e2190bd6 \
-make
-```
-
-### Run the test suite against an arbitrary super-linter container image
-
-You can run the test suite against an arbitrary super-linter container image.
-
-Here is an example that runs the test suite against the `v5.4.3` container image
-version.
-
-```shell
-CONTAINER_IMAGE_ID="ghcr.io/super-linter/super-linter:v5.4.3" \
-BUILD_DATE="2023-10-17T17:00:53Z" \
-BUILD_REVISION=b0d1acee1f8050d1684a28ddbf8315f81d084fe9 \
-BUILD_VERSION=b0d1acee1f8050d1684a28ddbf8315f81d084fe9 \
-make docker-pull test
-```
-
-Initialize the `BUILD_DATE`, `BUILD_REVISION`, and `BUILD_VERSION` variables
-with the values for that specific container image version. You can get these
-values from the build log for that version.
-
-### Get the list of available build targets
-
-To get the list of the available `Make` targets, run the following command:
-
-```shell
-make help
-```
-
-### Automatically fix formatting and linting issues
-
-To automatically fix linting and formatting issues when supported, run the
-following command:
-
-```shell
-make fix-codebase
-```

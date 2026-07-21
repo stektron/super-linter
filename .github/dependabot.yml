@@ -6,7 +6,7 @@ updates:
       prefix: "chore(devcontainer)"
     directory: "/"
     schedule:
-      interval: weekly
+      interval: daily
     open-pull-requests-limit: 100
 
   - package-ecosystem: github-actions
@@ -14,14 +14,19 @@ updates:
       prefix: "ci(github-actions)"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: daily
     open-pull-requests-limit: 100
     groups:
+      github-actions-security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
       dev-ci-tools:
         applies-to: version-updates
         patterns:
           - actions/*
           - akhilerm/tag-push-action
+          - dependabot/*
           - docker/*
           - googleapis/*
           - peter-evans/create-issue-from-file
@@ -32,53 +37,56 @@ updates:
     directories:
       - /dependencies
     schedule:
-      interval: "weekly"
+      interval: daily
     open-pull-requests-limit: 100
     groups:
-      commitlint:
+      npm-security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      npm:
         applies-to: version-updates
         patterns:
+          - "@babel/eslint-parser"
+          - "@babel/preset-react"
+          - "@babel/preset-typescript"
+          - "@biomejs/biome"
           - "@commitlint/*"
+          - "@react-native/eslint-config"
+          - "@typescript-eslint/eslint-plugin"
           - "commitlint"
-      eslint-plugins-configs:
-        applies-to: version-updates
-        patterns:
+          # TODO: add eslint back to this group after other dependencies are
+          # compatible with eslint >= 10.0.0
+          # - eslint
           - "eslint-config*"
           - "eslint-plugin*"
-      next:
-        applies-to: version-updates
-        patterns:
+          - jscpd
+          - npm-groovy-lint
+          - "react*"
+          - "stylelint*"
+          - "textlint*"
+          - htmlhint
+          - markdownlint-cli
           - next
           - next-pwa
-      react:
-        applies-to: version-updates
-        patterns:
-          - "react*"
-          - "@babel/preset-react"
-          - "@react-native/eslint-config"
-      stylelint:
-        applies-to: version-updates
-        patterns:
-          - "stylelint*"
-      textlint:
-        applies-to: version-updates
-        patterns:
-          - "textlint*"
-      typescript:
-        applies-to: version-updates
-        patterns:
-          - "@babel/preset-typescript"
-          - "@typescript-eslint/eslint-plugin"
-          - typescript
+          - prettier
+          - renovate
+          # TODO: add typescript back to this group after other dependencies are
+          # compatible with typescript >= 7.0.0
+          # - typescript
 
   - package-ecosystem: "bundler"
     commit-message:
       prefix: "deps(bundler)"
     directory: "/dependencies"
     schedule:
-      interval: "weekly"
+      interval: daily
     open-pull-requests-limit: 100
     groups:
+      bundler-security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
       rubocop:
         applies-to: version-updates
         patterns:
@@ -89,14 +97,19 @@ updates:
       prefix: "deps(docker)"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: daily
     open-pull-requests-limit: 100
     groups:
+      docker-security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
       docker:
         applies-to: version-updates
         # We can group all Docker dependencies because they are isolated from
         # each other
         patterns:
+          - aquasecurity/trivy
           - alpine/helm
           - alpine/terragrunt
           - dotenvlinter/dotenv-linter
@@ -107,7 +120,6 @@ updates:
           - hadolint/hadolint
           - hashicorp/terraform
           - kustomize/kustomize
-          - tenable/terrascan
           - terraform-linters/tflint
           - koalaman/shellcheck
           - mstruebing/editorconfig-checker
@@ -120,6 +132,7 @@ updates:
           - dart
           - powershell
           - composer/composer
+          - yannh/kubeconform
       docker-base-images:
         applies-to: version-updates
         patterns:
@@ -134,9 +147,13 @@ updates:
     directories:
       - /dependencies/python/
     schedule:
-      interval: "weekly"
+      interval: daily
     open-pull-requests-limit: 100
     groups:
+      pip-security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
       pip:
         applies-to: version-updates
         # We can group all python dependencies because each uses its own
@@ -146,17 +163,19 @@ updates:
           - black
           - cfn-lint
           - checkov
+          - codespell
           - cpplint
           - flake8
           - isort
           - mypy
-          - nbqa
+          - pre-commit
           - pylint
           - ruff
           - snakefmt
           - snakemake
           - sqlfluff
           - yamllint
+          - zizmor
 
   - package-ecosystem: "gradle"
     commit-message:
@@ -166,9 +185,13 @@ updates:
       - "/dependencies/google-java-format"
       - "/dependencies/ktlint"
     schedule:
-      interval: "weekly"
+      interval: daily
     open-pull-requests-limit: 100
     groups:
+      gradle-security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
       java-gradle:
         applies-to: version-updates
         # We can group all Java dependencies because they are isolated from
@@ -183,8 +206,17 @@ updates:
       prefix: "ci(dev-docker)"
     directory: "/dev-dependencies"
     schedule:
-      interval: "weekly"
+      interval: daily
     open-pull-requests-limit: 100
+    groups:
+      docker-dev-security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      docker-dev:
+        applies-to: version-updates
+        patterns:
+          - "*"
 
   - package-ecosystem: "npm"
     commit-message:
@@ -192,8 +224,17 @@ updates:
     directories:
       - /dev-dependencies
     schedule:
-      interval: "weekly"
+      interval: daily
     open-pull-requests-limit: 100
+    groups:
+      npm-dev-security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      npm-dev:
+        applies-to: version-updates
+        patterns:
+          - "*"
 
   - package-ecosystem: "composer"
     commit-message:
@@ -201,9 +242,13 @@ updates:
     directories:
       - dependencies/composer
     schedule:
-      interval: "weekly"
+      interval: daily
     open-pull-requests-limit: 100
     groups:
+      composer-security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
       composer:
         applies-to: version-updates
         patterns:

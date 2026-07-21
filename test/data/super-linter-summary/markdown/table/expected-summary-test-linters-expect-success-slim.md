@@ -1,12 +1,16 @@
 # Super-linter summary
 
 <!-- textlint-disable terminology -->
+<!-- Disable MD060 to avoid false positives because of emojis -->
+<!-- markdownlint-disable MD060 -->
 
 | Language                   | Validation result |
 | -------------------------- | ----------------- |
 | ANSIBLE                    | Pass ✅           |
 | BASH                       | Pass ✅           |
 | BASH_EXEC                  | Pass ✅           |
+| BIOME_FORMAT               | Pass ✅           |
+| BIOME_LINT                 | Pass ✅           |
 | CHECKOV                    | Pass ✅           |
 | CLANG_FORMAT               | Pass ✅           |
 | CLOUDFORMATION             | Pass ✅           |
@@ -20,6 +24,7 @@
 | EDITORCONFIG               | Pass ✅           |
 | ENV                        | Pass ✅           |
 | GITHUB_ACTIONS             | Pass ✅           |
+| GITHUB_ACTIONS_ZIZMOR      | Pass ✅           |
 | GITLEAKS                   | Pass ✅           |
 | GIT_COMMITLINT             | Pass ✅           |
 | GIT_MERGE_CONFLICT_MARKERS | Pass ✅           |
@@ -41,13 +46,8 @@
 | JSONC_PRETTIER             | Pass ✅           |
 | JSX                        | Pass ✅           |
 | JSX_PRETTIER               | Pass ✅           |
-| JUPYTER_NBQA_BLACK         | Pass ✅           |
-| JUPYTER_NBQA_FLAKE8        | Pass ✅           |
-| JUPYTER_NBQA_ISORT         | Pass ✅           |
-| JUPYTER_NBQA_MYPY          | Pass ✅           |
-| JUPYTER_NBQA_PYLINT        | Pass ✅           |
-| JUPYTER_NBQA_RUFF          | Pass ✅           |
 | KOTLIN                     | Pass ✅           |
+| KUBERNETES_KUBECONFORM     | Pass ✅           |
 | LATEX                      | Pass ✅           |
 | LUA                        | Pass ✅           |
 | MARKDOWN                   | Pass ✅           |
@@ -59,6 +59,7 @@
 | PHP_PHPCS                  | Pass ✅           |
 | PHP_PHPSTAN                | Pass ✅           |
 | PHP_PSALM                  | Pass ✅           |
+| PRE_COMMIT                 | Pass ✅           |
 | PROTOBUF                   | Pass ✅           |
 | PYTHON_BLACK               | Pass ✅           |
 | PYTHON_PYLINT              | Pass ✅           |
@@ -66,6 +67,7 @@
 | PYTHON_ISORT               | Pass ✅           |
 | PYTHON_MYPY                | Pass ✅           |
 | PYTHON_RUFF                | Pass ✅           |
+| PYTHON_RUFF_FORMAT         | Pass ✅           |
 | R                          | Pass ✅           |
 | RENOVATE                   | Pass ✅           |
 | RUBY                       | Pass ✅           |
@@ -73,11 +75,11 @@
 | SHELL_SHFMT                | Pass ✅           |
 | SNAKEMAKE_LINT             | Pass ✅           |
 | SNAKEMAKE_SNAKEFMT         | Pass ✅           |
+| SPELL_CODESPELL            | Pass ✅           |
 | STATES                     | Pass ✅           |
 | SQLFLUFF                   | Pass ✅           |
 | TERRAFORM_FMT              | Pass ✅           |
 | TERRAFORM_TFLINT           | Pass ✅           |
-| TERRAFORM_TERRASCAN        | Pass ✅           |
 | TERRAGRUNT                 | Pass ✅           |
 | TRIVY                      | Pass ✅           |
 | TSX                        | Pass ✅           |
@@ -89,6 +91,13 @@
 | YAML                       | Pass ✅           |
 | YAML_PRETTIER              | Pass ✅           |
 
+<!-- markdownlint-enable MD060 -->
 <!-- textlint-enable terminology -->
 
 All files and directories linted successfully
+
+For more information, see the Super-linter summary
+(super-linter-output/super-linter-summary.md) and the Super-linter log
+(super-linter.log)
+
+Powered by [Super-linter](https://github.com/super-linter/super-linter)

@@ -10,6 +10,10 @@ control "super-linter-environment-variables" do
   title "Super-Linter environment variables check"
   desc "Check that environment variables that Super-Linter needs are defined."
 
+  describe os_env("ARM_TTK_PSD1") do
+    its("content") { should eq "/usr/lib/microsoft/arm-ttk/arm-ttk.psd1" }
+  end
+
   describe os_env("VERSION_FILE") do
     its("content") { should eq version_file_path }
   end
@@ -58,7 +62,7 @@ control "super-linter-installed-packages" do
     "libxml2-utils",
     "nodejs-current",
     "npm",
-    "openjdk17-jre",
+    "openjdk21-jre",
     "openssh-client",
     "parallel",
     "perl",
@@ -149,6 +153,7 @@ control "super-linter-installed-commands" do
     { linter_name: "asl-validator" },
     { linter_name: "bash-exec", expected_exit_status: 1 }, # expect a return code = 1 because this linter doesn't support a "get linter version" command
     { linter_name: "black" },
+    { linter_name: "biome" },
     { linter_name: "cfn-lint" },
     { linter_name: "checkov" },
     { linter_name: "checkstyle", version_command: "java -jar /usr/bin/checkstyle --version" },
@@ -156,6 +161,7 @@ control "super-linter-installed-commands" do
     { linter_name: "clang-format" },
     { linter_name: "clippy", linter_command: "cargo clippy" },
     { linter_name: "clj-kondo" },
+    { linter_name: "codespell" },
     { linter_name: "coffeelint" },
     { linter_name: "commitlint" },
     { linter_name: "composer" },
@@ -177,11 +183,11 @@ control "super-linter-installed-commands" do
     { linter_name: "isort" },
     { linter_name: "jscpd" },
     { linter_name: "ktlint" },
+    { linter_name: "kubeconform", version_option: "-v" },
     { linter_name: "kustomize", version_option: "version" }, # not used as linter, needed for checkov's kustomize checks
     { linter_name: "lua", version_option: "-v" },
     { linter_name: "markdownlint" },
     { linter_name: "mypy" },
-    { linter_name: "nbqa" },
     { linter_name: "npm-groovy-lint" },
     { linter_name: "perl" },
     { linter_name: "php" },
@@ -191,6 +197,7 @@ control "super-linter-installed-commands" do
     { linter_name: "protolint", version_option: "version" },
     { linter_name: "psalm" },
     { linter_name: "pwsh" },
+    { linter_name: "pre-commit" },
     { linter_name: "pylint" },
     { linter_name: "R", version_command: "R --slave -e \"r_ver <- R.Version()\\$version.string; \
             lintr_ver <- packageVersion('lintr'); \
@@ -209,12 +216,12 @@ control "super-linter-installed-commands" do
     { linter_name: "stylelint" },
     { linter_name: "terraform" },
     { linter_name: "terragrunt" },
-    { linter_name: "terrascan", version_option: "version" },
     { linter_name: "textlint" },
     { linter_name: "tflint" },
     { linter_name: "trivy" },
     { linter_name: "xmllint" },
     { linter_name: "yamllint" },
+    { linter_name: "zizmor" },
   ]
 
   # Removed linters from slim image
@@ -330,6 +337,7 @@ control "super-linter-installed-npm-packages" do
     "@babel/eslint-parser",
     "@babel/preset-react",
     "@babel/preset-typescript",
+    "@biomejs/biome",
     "@coffeelint/cli",
     "@commitlint/config-conventional",
     "@stoplight/spectral-cli",
@@ -362,7 +370,6 @@ control "super-linter-installed-npm-packages" do
     "renovate",
     "stylelint",
     "stylelint-config-recommended-scss",
-    "stylelint-config-sass-guidelines",
     "stylelint-config-standard",
     "stylelint-config-standard-scss",
     "stylelint-prettier",
@@ -394,18 +401,20 @@ control "super-linter-installed-pypi-packages" do
     "black",
     "cfn-lint",
     "checkov",
+    "codespell",
     "cpplint",
     "flake8",
     "isort",
     "mypy",
-    "nbqa",
     "pylint",
+    "pre-commit",
     "ruff",
     "snakefmt",
     "snakemake",
     "sqlfluff",
     "yamllint",
-    "yq"
+    "yq",
+    "zizmor",
   ]
 
   pypi_packages.each do |item|
@@ -475,10 +484,13 @@ control "super-linter-validate-files" do
     "/action/lib/functions/updateSSL.sh",
     "/action/lib/functions/validation.sh",
     "/action/lib/functions/worker.sh",
+    "/action/lib/globals/main.sh",
     "/action/lib/globals/languages.sh",
     "/action/lib/globals/linterCommandsOptions.sh",
     "/action/lib/globals/linterRules.sh",
+    "/action/lib/globals/output.sh",
     "/action/lib/globals/runtimeDependencies.sh",
+    "/action/lib/globals/validation.sh",
     "/action/lib/.automation/actionlint.yml",
     "/action/lib/.automation/.ansible-lint.yml",
     "/action/lib/.automation/.arm-ttk.psd1",
@@ -488,6 +500,7 @@ control "super-linter-validate-files" do
     "/action/lib/.automation/.clang-format",
     "/action/lib/.automation/.clj-kondo",
     "/action/lib/.automation/.coffee-lint.json",
+    "/action/lib/.automation/.codespellrc",
     "/action/lib/.automation/.editorconfig-checker.json",
     "/action/lib/.automation/.flake8",
     "/action/lib/.automation/.golangci.yml",
@@ -500,10 +513,10 @@ control "super-linter-validate-files" do
     "/action/lib/.automation/.luacheckrc",
     "/action/lib/.automation/.markdown-lint.yml",
     "/action/lib/.automation/.mypy.ini",
-    "/action/lib/.automation/.jupyter-nbqa.toml",
     "/action/lib/.automation/.openapirc.yml",
     "/action/lib/.automation/.perlcriticrc",
     "/action/lib/.automation/.powershell-psscriptanalyzer.psd1",
+    "/action/lib/.automation/.pre-commit-config.yaml",
     "/action/lib/.automation/.protolintrc.yml",
     "/action/lib/.automation/.python-black",
     "/action/lib/.automation/.python-lint",
@@ -513,14 +526,15 @@ control "super-linter-validate-files" do
     "/action/lib/.automation/.shellcheckrc",
     "/action/lib/.automation/.snakefmt.toml",
     "/action/lib/.automation/.sqlfluff",
-    "/action/lib/.automation/.stylelintrc.json",
     "/action/lib/.automation/.tflint.hcl",
     "/action/lib/.automation/.yaml-lint.yml",
     "/action/lib/.automation/eslint.config.mjs",
     "/action/lib/.automation/phpcs.xml",
     "/action/lib/.automation/phpstan.neon",
     "/action/lib/.automation/psalm.xml",
+    "/action/lib/.automation/stylelint.config.mjs",
     "/action/lib/.automation/trivy.yaml",
+    "/action/lib/.automation/zizmor.yaml",
     "/usr/bin/bash-exec",
     "/usr/bin/git-merge-conflict-markers",
     "/usr/bin/helm", # needed for checkov's helm framework

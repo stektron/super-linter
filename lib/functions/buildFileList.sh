@@ -11,38 +11,44 @@ function IssueHintForFullGitHistory() {
 export -f IssueHintForFullGitHistory
 
 function GenerateFileDiff() {
-  local DIFF_TREE_CMD
-  local GIT_DIFF_TERM
-  if [[ "${GITHUB_SHA}" == "${GIT_ROOT_COMMIT_SHA}" ]]; then
-    GIT_DIFF_TERM=""
-    debug "Setting GIT_DIFF_TERM to an empty string because there's no commit before the initial commit to diff against."
-  elif [[ -z "${GITHUB_BEFORE_SHA:-""}" ]] ||
-    [[ "${GITHUB_EVENT_NAME:-""}" == "pull_request" ]]; then
-    GIT_DIFF_TERM="${DEFAULT_BRANCH}"
-    debug "Setting GIT_DIFF_TERM to the value of DEFAULT_BRANCH because GITHUB_BEFORE_SHA was not initialized: ${GIT_DIFF_TERM}"
-  else
-    GIT_DIFF_TERM="${GITHUB_BEFORE_SHA}"
-    debug "Setting GIT_DIFF_TERM to the value of GITHUB_BEFORE_SHA: ${GIT_DIFF_TERM}"
+  if [[ ! -v GITHUB_BEFORE_SHA ]]; then
+    error "GITHUB_BEFORE_SHA is not initialized."
+    return 1
   fi
-  DIFF_TREE_CMD="git -C \"${GITHUB_WORKSPACE}\" diff-tree --no-commit-id --name-only -r --root ${GITHUB_SHA} ${GIT_DIFF_TERM} | xargs -I % sh -c 'echo \"${GITHUB_WORKSPACE}/%\"' 2>&1"
-  RunFileDiffCommand "${DIFF_TREE_CMD}"
-}
 
-function RunFileDiffCommand() {
-  local CMD
-  CMD="${1}"
-  debug "Generating Diff with:[$CMD]"
+  if [[ ! -v GITHUB_SHA ]]; then
+    error "GITHUB_SHA is not initialized."
+    return 1
+  fi
 
-  #################################################
-  # Get the Array of files changed in the commits #
-  #################################################
-  if ! CMD_OUTPUT=$(eval "set -eo pipefail; $CMD; set +eo pipefail"); then
-    error "Failed to get Diff with:[$CMD]"
+  debug "Getting the list of changed files considering GITHUB_BEFORE_SHA (${GITHUB_BEFORE_SHA}) and GITHUB_SHA (${GITHUB_SHA})"
+
+  # Get the list of files that changed between "${GITHUB_BEFORE_SHA}"
+  # "${GITHUB_SHA}" refs, and add ${GITHUB_WORKSPACE} as a prefix
+  local LIST_OF_CHANGED_FILES
+  if ! LIST_OF_CHANGED_FILES=$(
+    set -o pipefail
+
+    # Exclude deleted files (lowercase d in --diff-filter)
+    # Ref: https://git-scm.com/docs/git-diff-tree#Documentation/git-diff-tree.txt---diff-filterACDMRTUXB
+    git -C "${GITHUB_WORKSPACE}" diff-tree \
+      --diff-filter=d \
+      --no-commit-id \
+      --name-only \
+      -r \
+      --root \
+      "${GITHUB_BEFORE_SHA}" "${GITHUB_SHA}" | sed "s|^|${GITHUB_WORKSPACE}/|"
+  ); then
+    error "Failed to get a list of changed files. LIST_OF_CHANGED_FILES: ${LIST_OF_CHANGED_FILES}"
     IssueHintForFullGitHistory
-    fatal "Diff command output: ${CMD_OUTPUT}"
+    return 1
   fi
 
-  mapfile -t RAW_FILE_ARRAY < <(echo -n "$CMD_OUTPUT")
+  RAW_FILE_ARRAY=()
+  if [[ -n "${LIST_OF_CHANGED_FILES:-}" ]]; then
+    # Load the list of files in the repository in the list of files to check
+    mapfile -t RAW_FILE_ARRAY <<<"${LIST_OF_CHANGED_FILES}"
+  fi
 }
 
 function BuildFileList() {
@@ -57,7 +63,9 @@ function BuildFileList() {
   if [ "${VALIDATE_ALL_CODEBASE}" == "false" ] && [ "${TEST_CASE_RUN}" != "true" ]; then
     debug "Build the list of all changed files"
 
-    GenerateFileDiff
+    if ! GenerateFileDiff; then
+      fatal "Error while generating file diff"
+    fi
   else
     if [ "${USE_FIND_ALGORITHM}" == 'true' ]; then
       debug "Populating the file list with all the files in the ${GITHUB_WORKSPACE} workspace using FIND algorithm"
@@ -87,10 +95,21 @@ function BuildFileList() {
       fi
 
     else
-      DIFF_GIT_VALIDATE_ALL_CODEBASE="git -C \"${GITHUB_WORKSPACE}\" ls-tree -r --name-only HEAD | xargs -I % sh -c \"echo ${GITHUB_WORKSPACE}/%\" 2>&1"
-      debug "Populating the file list with: ${DIFF_GIT_VALIDATE_ALL_CODEBASE}"
-      if ! mapfile -t RAW_FILE_ARRAY < <(eval "set -eo pipefail; ${DIFF_GIT_VALIDATE_ALL_CODEBASE}; set +eo pipefail"); then
-        fatal "Failed to get a list of changed files. USE_FIND_ALGORITHM: ${USE_FIND_ALGORITHM}"
+
+      # Get the list of files in the codebase, and add ${GITHUB_WORKSPACE} as a
+      # prefix
+      local LIST_OF_FILES_IN_REPO
+      if ! LIST_OF_FILES_IN_REPO=$(
+        set -o pipefail
+        git -C "${GITHUB_WORKSPACE}" ls-tree -r --name-only HEAD | sed "s|^|${GITHUB_WORKSPACE}/|"
+      ); then
+        fatal "Failed to get a list of changed files. LIST_OF_FILES_IN_REPO: ${LIST_OF_FILES_IN_REPO}"
+      fi
+
+      RAW_FILE_ARRAY=()
+      if [[ -n "${LIST_OF_FILES_IN_REPO:-}" ]]; then
+        # Load the list of files in the repository in the list of files to check
+        mapfile -t RAW_FILE_ARRAY <<<"${LIST_OF_FILES_IN_REPO}"
       fi
     fi
   fi
@@ -99,6 +118,8 @@ function BuildFileList() {
 
   if [ ${#RAW_FILE_ARRAY[@]} -eq 0 ]; then
     warn "No files were found in the GITHUB_WORKSPACE:[${GITHUB_WORKSPACE}] to lint!"
+  else
+    debug "RAW_FILE_ARRAY contains ${#RAW_FILE_ARRAY[@]} items: ${RAW_FILE_ARRAY[*]}"
   fi
 
   ####################################################
@@ -107,6 +128,22 @@ function BuildFileList() {
   debug "Checking if we are in test mode before configuring the list of directories to lint. TEST_CASE_RUN: ${TEST_CASE_RUN}"
   if [ "${TEST_CASE_RUN}" == "true" ]; then
     debug "We are running in test mode."
+
+    debug "Adding test case directories to the list of directories to analyze with BIOME_FORMAT."
+    DEFAULT_BIOME_FORMAT_TEST_CASE_DIRECTORY="${GITHUB_WORKSPACE}/${TEST_CASE_FOLDER}/biome_format"
+    # We need this for parallel
+    export DEFAULT_BIOME_FORMAT_TEST_CASE_DIRECTORY
+    debug "DEFAULT_BIOME_FORMAT_TEST_CASE_DIRECTORY: ${DEFAULT_BIOME_FORMAT_TEST_CASE_DIRECTORY}"
+    RAW_FILE_ARRAY+=("${DEFAULT_BIOME_FORMAT_TEST_CASE_DIRECTORY}/bad")
+    RAW_FILE_ARRAY+=("${DEFAULT_BIOME_FORMAT_TEST_CASE_DIRECTORY}/good")
+
+    debug "Adding test case directories to the list of directories to analyze with BIOME_LINT."
+    DEFAULT_BIOME_LINT_TEST_CASE_DIRECTORY="${GITHUB_WORKSPACE}/${TEST_CASE_FOLDER}/biome_lint"
+    # We need this for parallel
+    export DEFAULT_BIOME_LINT_TEST_CASE_DIRECTORY
+    debug "DEFAULT_BIOME_LINT_TEST_CASE_DIRECTORY: ${DEFAULT_BIOME_LINT_TEST_CASE_DIRECTORY}"
+    RAW_FILE_ARRAY+=("${DEFAULT_BIOME_LINT_TEST_CASE_DIRECTORY}/bad")
+    RAW_FILE_ARRAY+=("${DEFAULT_BIOME_LINT_TEST_CASE_DIRECTORY}/good")
 
     debug "Adding test case directories to the list of directories to analyze with JSCPD."
     DEFAULT_JSCPD_TEST_CASE_DIRECTORY="${GITHUB_WORKSPACE}/${TEST_CASE_FOLDER}/jscpd"
@@ -131,14 +168,31 @@ function BuildFileList() {
     debug "DEFAULT_TRIVY_TEST_CASE_DIRECTORY: ${DEFAULT_TRIVY_TEST_CASE_DIRECTORY}"
     RAW_FILE_ARRAY+=("${DEFAULT_TRIVY_TEST_CASE_DIRECTORY}/bad")
     RAW_FILE_ARRAY+=("${DEFAULT_TRIVY_TEST_CASE_DIRECTORY}/good")
+
+    debug "Adding test case directories to the list of directories to analyze with pre-commit."
+    DEFAULT_PRE_COMMIT_TEST_CASE_DIRECTORY="${GITHUB_WORKSPACE}/${TEST_CASE_FOLDER}/pre_commit"
+    # We need this for parallel
+    export DEFAULT_PRE_COMMIT_TEST_CASE_DIRECTORY
+    debug "DEFAULT_PRE_COMMIT_TEST_CASE_DIRECTORY: ${DEFAULT_PRE_COMMIT_TEST_CASE_DIRECTORY}"
+    RAW_FILE_ARRAY+=("${DEFAULT_PRE_COMMIT_TEST_CASE_DIRECTORY}/bad")
+    RAW_FILE_ARRAY+=("${DEFAULT_PRE_COMMIT_TEST_CASE_DIRECTORY}/good")
   fi
 
   debug "Add GITHUB_WORKSPACE (${GITHUB_WORKSPACE}) to the list of files to lint because we might need it for linters that lint the whole workspace"
   RAW_FILE_ARRAY+=("${GITHUB_WORKSPACE}")
 
   if [ -d "${ANSIBLE_DIRECTORY}" ]; then
-    debug "Adding ANSIBLE_DIRECTORY (${ANSIBLE_DIRECTORY}) to the list of files and directories to lint."
-    RAW_FILE_ARRAY+=("${ANSIBLE_DIRECTORY}")
+    local ANSIBLE_DIRECTORY_REAL_PATH
+    if ! ANSIBLE_DIRECTORY_REAL_PATH="$(readlink -f "${ANSIBLE_DIRECTORY}" 2>&1)"; then
+      fatal "Error while initializing ANSIBLE_DIRECTORY_REAL_PATH: ${ANSIBLE_DIRECTORY_REAL_PATH}"
+    fi
+    debug "ANSIBLE_DIRECTORY_REAL_PATH: ${ANSIBLE_DIRECTORY_REAL_PATH}"
+    if [[ "${ANSIBLE_DIRECTORY_REAL_PATH}" != "${GITHUB_WORKSPACE}" ]]; then
+      debug "Adding ANSIBLE_DIRECTORY (${ANSIBLE_DIRECTORY}) to the list of files and directories to lint."
+      RAW_FILE_ARRAY+=("${ANSIBLE_DIRECTORY}")
+    else
+      debug "Skip adding ANSIBLE_DIRECTORY to the list of files and directories to lint because it matches GITHUB_WORKSPACE (${GITHUB_WORKSPACE}), and it was already added to the list."
+    fi
   else
     debug "ANSIBLE_DIRECTORY (${ANSIBLE_DIRECTORY}) does NOT exist."
   fi
@@ -151,12 +205,17 @@ function BuildFileList() {
   PARALLEL_COMMAND=(parallel --will-cite --keep-order --max-procs "$(($(nproc) * 1))" --results "${PARALLEL_RESULTS_FILE_PATH}" --xargs)
 
   if [ "${LOG_DEBUG}" == "true" ]; then
-    debug "LOG_DEBUG is enabled. Enable verbose ouput for parallel"
-    PARALLEL_COMMAND+=(--verbose)
+    debug "LOG_DEBUG is enabled. Enable verbose output for parallel"
+    PARALLEL_COMMAND+=(-v)
   fi
 
   # Max number of files to categorize per process
   PARALLEL_COMMAND+=(--max-lines 10)
+
+  # Disable saving the output to the Super-linter log file to avoid that output
+  # shows as interleaved with output from other jobs running in parallel.
+  # Post-processing logic after running GNU Parallel will print the logs
+  PARALLEL_COMMAND+=(CREATE_LOG_FILE="false")
 
   PARALLEL_COMMAND+=("BuildFileArrays")
   debug "PARALLEL_COMMAND to build the list of files and directories to lint: ${PARALLEL_COMMAND[*]}"
@@ -213,14 +272,134 @@ function BuildFileList() {
   info "Successfully gathered list of files..."
 }
 
+AddToPythonFileArrays() {
+  local FILE="${1}"
+
+  echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_BLACK"
+  echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_FLAKE8"
+  echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_ISORT"
+  echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_PYLINT"
+  echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_MYPY"
+  echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_RUFF"
+  echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_RUFF_FORMAT"
+}
+
+AddToShfmtFileArray() {
+  local FILE="${1}"
+  debug "Adding ${FILE} to SHELL_SHFMT file array"
+  echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-SHELL_SHFMT"
+}
+
+AddToBashExecFileArray() {
+  local FILE="${1}"
+  debug "Adding ${FILE} to BASH_EXEC file array"
+  echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-BASH_EXEC"
+}
+
+AddToShellFileArrays() {
+  local FILE="${1}"
+  debug "Adding ${FILE} to shell file arrays"
+
+  echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-BASH"
+  AddToBashExecFileArray "${FILE}"
+  AddToShfmtFileArray "${FILE}"
+}
+
+AddToPerlFileArrays() {
+  local FILE="${1}"
+
+  echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PERL"
+}
+
+AddToRubyFileArrays() {
+  local FILE="${1}"
+
+  echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-RUBY"
+}
+
+CheckFileType() {
+  local FILE
+  FILE="$1"
+
+  local FILE_EXTENSION
+  if ! FILE_EXTENSION="$(GetFileExtension "$FILE" 2>&1)"; then
+    error "Error while getting the file extension for $FILE: $FILE_EXTENSION"
+    return 1
+  fi
+
+  local GET_FILE_TYPE_CMD
+  if ! GET_FILE_TYPE_CMD="$(file --brief "${FILE}" 2>&1)"; then
+    error "Error while checking file type: ${GET_FILE_TYPE_CMD}"
+    return 1
+  fi
+  debug "Detected file type for ${FILE}: ${GET_FILE_TYPE_CMD}. File extension: ${FILE_EXTENSION:-"not set"}"
+
+  local FILE_TYPE_MESSAGE
+
+  case "${GET_FILE_TYPE_CMD}" in
+  *"Python script"*)
+    FILE_TYPE_MESSAGE="Found Python script without extension: ${FILE}"
+    AddToPythonFileArrays "${FILE}"
+    ;;
+  *"Perl script"*)
+    FILE_TYPE_MESSAGE="Found Perl script without extension: ${FILE}"
+    AddToPerlFileArrays "${FILE}"
+    ;;
+  *"Ruby script"*)
+    FILE_TYPE_MESSAGE="Found Ruby file without extension: ${FILE}"
+    AddToRubyFileArrays "${FILE}"
+    ;;
+  *"zsh script"*)
+    FILE_TYPE_MESSAGE="Found a ZSH script: ${FILE}"
+    AddToBashExecFileArray "${FILE}"
+    AddToShfmtFileArray "${FILE}"
+    ;;
+  *"POSIX shell script"* | *"Bourne-Again shell script"* | *"Dash shell script"* | *"Korn shell script"* | *"sh script"*)
+    FILE_TYPE_MESSAGE="Found a Shell script: ${FILE}"
+    AddToShellFileArrays "${FILE}"
+    ;;
+  *"ASCII text"*)
+    FILE_TYPE_MESSAGE="Found ASCII text: ${FILE}"
+    # Check if the file is a shell script with the sh extension, without shebang
+    if [[ "$FILE_EXTENSION" == "sh" ]]; then
+      FILE_TYPE_MESSAGE="Found a shell script without shebang: ${FILE}"
+      AddToShellFileArrays "${FILE}"
+    else
+      return 1
+    fi
+    ;;
+  *)
+    FILE_TYPE_MESSAGE="Failed to get file type for: ${FILE}. Output: ${GET_FILE_TYPE_CMD}"
+    return 1
+    ;;
+  esac
+
+  if [ "${SUPPRESS_FILE_TYPE_WARN}" == "false" ]; then
+    warn "${FILE_TYPE_MESSAGE}"
+  else
+    debug "${FILE_TYPE_MESSAGE}"
+  fi
+}
+
 BuildFileArrays() {
   local -a RAW_FILE_ARRAY
   RAW_FILE_ARRAY=("$@")
 
   debug "Categorizing the following files: ${RAW_FILE_ARRAY[*]}"
-  debug "FILTER_REGEX_INCLUDE: ${FILTER_REGEX_INCLUDE}, FILTER_REGEX_EXCLUDE: ${FILTER_REGEX_EXCLUDE}, TEST_CASE_RUN: ${TEST_CASE_RUN}"
+
+  RENOVATE_SHAREABLE_CONFIG_PRESET_FILE_NAMES_ARRAY=()
+  if [[ -n "${RENOVATE_SHAREABLE_CONFIG_PRESET_FILE_NAMES:-}" ]]; then
+    # See https://docs.renovatebot.com/config-presets/
+    IFS="," read -r -a RENOVATE_SHAREABLE_CONFIG_PRESET_FILE_NAMES_ARRAY <<<"${RENOVATE_SHAREABLE_CONFIG_PRESET_FILE_NAMES}"
+    debug "Initialized RENOVATE_SHAREABLE_CONFIG_PRESET_FILE_NAMES_ARRAY with: ${RENOVATE_SHAREABLE_CONFIG_PRESET_FILE_NAMES_ARRAY[*]}"
+  fi
 
   for FILE in "${RAW_FILE_ARRAY[@]}"; do
+    if [[ -z "${FILE:-""}" ]]; then
+      error "FILE is empty."
+      return 1
+    fi
+
     # Get the file extension
     FILE_TYPE="$(GetFileExtension "$FILE")"
     # We want a lowercase value
@@ -233,7 +412,7 @@ BuildFileArrays() {
 
     if [ ! -e "${FILE}" ]; then
       # File not found in workspace
-      warn "{$FILE} exists in commit data, but not found on file system, skipping..."
+      warn "${FILE} exists in commit data, but not found on file system, skipping..."
       continue
     fi
 
@@ -254,11 +433,20 @@ BuildFileArrays() {
 
       # Test cases for these languages are handled below because we first need to exclude non-relevant test cases
       if [[ "${TEST_CASE_RUN}" == "false" ]]; then
-        debug "Add ${FILE} to the list of items to lint with JSCPD"
-        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JSCPD"
+        debug "Add ${FILE} to the list of items to lint with BIOME_FORMAT"
+        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-BIOME_FORMAT"
+
+        debug "Add ${FILE} to the list of items to lint with BIOME_LINT"
+        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-BIOME_LINT"
 
         debug "Add ${FILE} to the list of items to lint with Commitlint"
         echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-GIT_COMMITLINT"
+
+        debug "Add ${FILE} to the list of items to lint with JSCPD"
+        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JSCPD"
+
+        debug "Add ${FILE} to the list of items to lint with pre-commit"
+        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PRE_COMMIT"
 
         debug "Add ${FILE} to the list of items to lint with Trivy"
         echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-TRIVY"
@@ -274,10 +462,19 @@ BuildFileArrays() {
       continue
     fi
 
+    local FILE_PATH_FOR_REGEXES="${FILE}"
+
+    if [[ "${STRIP_DEFAULT_WORKSPACE_FOR_REGEX}" == "true" ]]; then
+      # Remove the workspace from the path to to match against regular expressions
+      # that look for the beginning of the string. Example: ^file\.ext$
+      FILE_PATH_FOR_REGEXES="${FILE#"${GITHUB_WORKSPACE}/"}"
+      debug "Stripping the default workspace from FILE_PATH_FOR_REGEXES: ${FILE_PATH_FOR_REGEXES}"
+    fi
+
     ###############################################
     # Filter files if FILTER_REGEX_INCLUDE is set #
     ###############################################
-    if [[ -n "$FILTER_REGEX_INCLUDE" ]] && [[ ! (${FILE} =~ $FILTER_REGEX_INCLUDE) ]]; then
+    if [[ -n "$FILTER_REGEX_INCLUDE" ]] && [[ ! (${FILE_PATH_FOR_REGEXES} =~ $FILTER_REGEX_INCLUDE) ]]; then
       debug "FILTER_REGEX_INCLUDE didn't match. Skipping ${FILE}"
       continue
     fi
@@ -285,7 +482,7 @@ BuildFileArrays() {
     ###############################################
     # Filter files if FILTER_REGEX_EXCLUDE is set #
     ###############################################
-    if [[ -n "$FILTER_REGEX_EXCLUDE" ]] && [[ ${FILE} =~ $FILTER_REGEX_EXCLUDE ]]; then
+    if [[ -n "$FILTER_REGEX_EXCLUDE" ]] && [[ ${FILE_PATH_FOR_REGEXES} =~ $FILTER_REGEX_EXCLUDE ]]; then
       debug "FILTER_REGEX_EXCLUDE match. Skipping ${FILE}"
       continue
     fi
@@ -317,52 +514,64 @@ BuildFileArrays() {
 
     echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-GIT_MERGE_CONFLICT_MARKERS"
     echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-GITLEAKS"
+    echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-SPELL_CODESPELL"
 
     if IsAnsibleDirectory "${FILE}"; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-ANSIBLE"
     fi
 
-    # Handle JSCPD test cases
-    # At this point, we already processed the options to include or exclude files, so we
-    # excluded test cases that are not relevant
-    if [[ "${TEST_CASE_RUN}" == "true" ]] && [[ "${FILE}" =~ .*${DEFAULT_JSCPD_TEST_CASE_DIRECTORY}.* ]] && [[ -d "${FILE}" ]]; then
-      debug "${FILE} is a test case for JSCPD. Adding it to the list of items to lint with JSCPD"
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JSCPD"
-    fi
-
-    # Handle Commitlint test cases
-    if [[ "${TEST_CASE_RUN}" == "true" ]] && [[ "${FILE}" =~ .*${DEFAULT_GIT_COMMITLINT_TEST_CASE_DIRECTORY}.* ]] && [[ -d "${FILE}" ]]; then
-      debug "${FILE} is a test case for Commitlint. Adding it to the list of items to lint with Commitlint"
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-GIT_COMMITLINT"
-    fi
-
-    # Handle Trivy test cases
-    if [[ "${TEST_CASE_RUN}" == "true" ]] && [[ "${FILE}" =~ .*${DEFAULT_TRIVY_TEST_CASE_DIRECTORY}.* ]] && [[ -d "${FILE}" ]]; then
-      debug "${FILE} is a test case for Trivy. Adding it to the list of items to lint with Trivy"
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-TRIVY"
-    fi
-
+    # Check for Renovate files because they might be JSON5 files that we
+    # also want to lint as JSON5 files.
     # See https://docs.renovatebot.com/configuration-options/
     if [[ "${BASE_FILE}" =~ renovate.json5? ]] ||
-      [ "${BASE_FILE}" == ".renovaterc" ] || [[ "${BASE_FILE}" =~ .renovaterc.json5? ]]; then
+      [ "${BASE_FILE}" == ".renovaterc" ] ||
+      [[ "${BASE_FILE}" =~ .renovaterc.json5? ]]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-RENOVATE"
     fi
-
-    # See https://docs.renovatebot.com/config-presets/
-    IFS="," read -r -a RENOVATE_SHAREABLE_CONFIG_PRESET_FILE_NAMES_ARRAY <<<"${RENOVATE_SHAREABLE_CONFIG_PRESET_FILE_NAMES}"
-    for file_name in "${RENOVATE_SHAREABLE_CONFIG_PRESET_FILE_NAMES_ARRAY[@]}"; do
-      if [ "${BASE_FILE}" == "${file_name}" ]; then
-        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-RENOVATE"
-        break
+    # Handle test cases for tools that lint the entire workspace
+    if [[ "${TEST_CASE_RUN}" == "true" ]] && [[ -d "${FILE}" ]]; then
+      # Handle BIOME_FORMAT test cases
+      if [[ "${FILE}" =~ .*${DEFAULT_BIOME_FORMAT_TEST_CASE_DIRECTORY}.* ]]; then
+        debug "${FILE} is a test case for BIOME_FORMAT. Adding it to the list of items to lint with BIOME_FORMAT"
+        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-BIOME_FORMAT"
+      # Handle BIOME_LINT test cases
+      elif [[ "${FILE}" =~ .*${DEFAULT_BIOME_LINT_TEST_CASE_DIRECTORY}.* ]]; then
+        debug "${FILE} is a test case for BIOME_LINT. Adding it to the list of items to lint with BIOME_LINT"
+        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-BIOME_LINT"
+      # Handle Commitlint test cases
+      elif [[ "${FILE}" =~ .*${DEFAULT_GIT_COMMITLINT_TEST_CASE_DIRECTORY}.* ]]; then
+        debug "${FILE} is a test case for Commitlint. Adding it to the list of items to lint with Commitlint"
+        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-GIT_COMMITLINT"
+      # Handle JSCPD test cases
+      elif [[ "${FILE}" =~ .*${DEFAULT_JSCPD_TEST_CASE_DIRECTORY}.* ]]; then
+        debug "${FILE} is a test case for JSCPD. Adding it to the list of items to lint with JSCPD"
+        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JSCPD"
+      # Handle pre-commit test cases
+      elif [[ "${FILE}" =~ .*${DEFAULT_PRE_COMMIT_TEST_CASE_DIRECTORY}.* ]]; then
+        debug "${FILE} is a test case for pre-commit. Adding it to the list of items to lint with pre-commit"
+        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PRE_COMMIT"
+      # Handle Trivy test cases
+      elif [[ "${FILE}" =~ .*${DEFAULT_TRIVY_TEST_CASE_DIRECTORY}.* ]]; then
+        debug "${FILE} is a test case for Trivy. Adding it to the list of items to lint with Trivy"
+        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-TRIVY"
       fi
-    done
+    fi
 
-    if IsValidShellScript "${FILE}"; then
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-BASH"
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-BASH_EXEC"
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-SHELL_SHFMT"
+    # Select files by extension or file name
+
+    # Don't include .sh scripts so they fall in the 'else' clause where we
+    # dynamically check their file type to avoid that we add ZSH scripts when
+    # they are not supported.
+    if [ "${FILE_TYPE}" == "bash" ] ||
+      [ "${FILE_TYPE}" == "bats" ] ||
+      [ "${FILE_TYPE}" == "dash" ] ||
+      [ "${FILE_TYPE}" == "ksh" ]; then
+      AddToShellFileArrays "${FILE}"
+    elif [ "${FILE_TYPE}" == "zsh" ]; then
+      AddToBashExecFileArray "${FILE}"
+      AddToShfmtFileArray "${FILE}"
     elif [ "${FILE_TYPE}" == "clj" ] || [ "${FILE_TYPE}" == "cljs" ] ||
-      [ "${FILE_TYPE}" == "cljc" ] || [ "${FILE_TYPE}" == "edn" ]; then
+      [ "${FILE_TYPE}" == "cljc" ] || [ "${FILE_TYPE}" == "edn" ]; then # codespell:ignore edn
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-CLOJURE"
     elif [ "${FILE_TYPE}" == "cpp" ] || [ "${FILE_TYPE}" == "h" ] ||
       [ "${FILE_TYPE}" == "cc" ] || [ "${FILE_TYPE}" == "hpp" ] ||
@@ -488,13 +697,6 @@ BuildFileArrays() {
       else
         debug "Skip adding ${FILE} to JSX_PRETTIER file array because Prettier doesn't support following symbolic links"
       fi
-    elif [ "${FILE_TYPE}" == "ipynb" ]; then
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JUPYTER_NBQA_BLACK"
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JUPYTER_NBQA_FLAKE8"
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JUPYTER_NBQA_ISORT"
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JUPYTER_NBQA_MYPY"
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JUPYTER_NBQA_PYLINT"
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JUPYTER_NBQA_RUFF"
     elif [ "${FILE_TYPE}" == "kt" ] || [ "${FILE_TYPE}" == "kts" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-KOTLIN"
     elif [ "$FILE_TYPE" == "lua" ]; then
@@ -516,7 +718,7 @@ BuildFileArrays() {
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PHP_PSALM"
     elif [ "${FILE_TYPE}" == "pl" ] || [ "${FILE_TYPE}" == "pm" ] ||
       [ "${FILE_TYPE}" == "t" ]; then
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PERL"
+      AddToPerlFileArrays "${FILE}"
     elif [ "${FILE_TYPE}" == "ps1" ] ||
       [ "${FILE_TYPE}" == "psm1" ] ||
       [ "${FILE_TYPE}" == "psd1" ] ||
@@ -528,20 +730,16 @@ BuildFileArrays() {
     elif [ "${FILE_TYPE}" == "proto" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PROTOBUF"
     elif [ "${FILE_TYPE}" == "py" ]; then
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_BLACK"
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_FLAKE8"
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_ISORT"
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_PYLINT"
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_MYPY"
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_RUFF"
+      AddToPythonFileArrays "${FILE}"
     elif [ "${FILE_TYPE}" == "r" ] || [ "${FILE_TYPE}" == "rmd" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-R"
     elif [ "${FILE_TYPE}" == "rb" ]; then
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-RUBY"
+      AddToRubyFileArrays "${FILE}"
     elif [ "${FILE_TYPE}" == "rs" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-RUST_2015"
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-RUST_2018"
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-RUST_2021"
+      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-RUST_2024"
     elif [ "${BASE_FILE}" == "cargo.toml" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-RUST_CLIPPY"
     elif [ "${FILE_TYPE}" == "scala" ] || [ "${FILE_TYPE}" == "sc" ] || [ "${BASE_FILE}" == "??????" ]; then
@@ -553,7 +751,6 @@ BuildFileArrays() {
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-SQLFLUFF"
     elif [ "${FILE_TYPE}" == "tf" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-TERRAFORM_TFLINT"
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-TERRAFORM_TERRASCAN"
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-TERRAFORM_FMT"
     elif [ "${FILE_TYPE}" == "hcl" ] &&
       [[ ${FILE} != *".tflint.hcl"* ]] &&
@@ -601,8 +798,14 @@ BuildFileArrays() {
       else
         debug "Skip adding ${FILE} to YAML_PRETTIER file array because Prettier doesn't support following symbolic links"
       fi
-      if DetectActions "${FILE}"; then
+      if DetectGitHubActionsWorkflows "${FILE}"; then
         echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-GITHUB_ACTIONS"
+        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-GITHUB_ACTIONS_ZIZMOR"
+      fi
+
+      if DetectDependabot "${FILE}" ||
+        DetectGitHubActions "${FILE}"; then
+        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-GITHUB_ACTIONS_ZIZMOR"
       fi
 
       if DetectCloudFormationFile "${FILE}"; then
@@ -612,11 +815,38 @@ BuildFileArrays() {
       if DetectOpenAPIFile "${FILE}"; then
         echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-OPENAPI"
       fi
+
+      if DetectKubernetesFile "${FILE}"; then
+        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-KUBERNETES_KUBECONFORM"
+      fi
     else
-      CheckFileType "${FILE}"
+      # Fallback option: look at the file contents
+      if ! CheckFileType "${FILE}"; then
+        debug "Failed to get file type for ${FILE}"
+      fi
+    fi
+
+    # Handle the special case of Renovate shareable config presets
+    # Ref: https://docs.renovatebot.com/config-presets/
+    if [[ "$FILE_TYPE" == "json" ]] ||
+      [[ "$FILE_TYPE" == "json5" ]] ||
+      [[ "$FILE_TYPE" == "jsonc" ]]; then
+      for file_name in "${RENOVATE_SHAREABLE_CONFIG_PRESET_FILE_NAMES_ARRAY[@]}"; do
+        if [ "${BASE_FILE}" == "${file_name}" ]; then
+          echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-RENOVATE"
+          break
+        fi
+      done
     fi
   done
 }
 
-# We need this for parallel
+# We need so subprocesses (such as GNU Parallel) have access to these functions
+export -f AddToBashExecFileArray
+export -f AddToPerlFileArrays
+export -f AddToPythonFileArrays
+export -f AddToRubyFileArrays
+export -f AddToShellFileArrays
+export -f AddToShfmtFileArray
 export -f BuildFileArrays
+export -f CheckFileType

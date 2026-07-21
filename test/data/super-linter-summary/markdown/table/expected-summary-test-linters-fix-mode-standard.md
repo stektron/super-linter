@@ -1,10 +1,14 @@
 # Super-linter summary
 
 <!-- textlint-disable terminology -->
+<!-- Disable MD060 to avoid false positives because of emojis -->
+<!-- markdownlint-disable MD060 -->
 
 | Language                     | Validation result |
 | ---------------------------- | ----------------- |
-| ANSIBLE                      | Pass ✅           |
+| ANSIBLE                      | Fail ❌           |
+| BIOME_FORMAT                 | Pass ✅           |
+| BIOME_LINT                   | Pass ✅           |
 | CLANG_FORMAT                 | Pass ✅           |
 | CSHARP                       | Pass ✅           |
 | CSS                          | Pass ✅           |
@@ -13,6 +17,7 @@
 | DOTNET_SLN_FORMAT_STYLE      | Pass ✅           |
 | DOTNET_SLN_FORMAT_WHITESPACE | Pass ✅           |
 | ENV                          | Pass ✅           |
+| GITHUB_ACTIONS_ZIZMOR        | Pass ✅           |
 | GO                           | Pass ✅           |
 | GO_MODULES                   | Pass ✅           |
 | GOOGLE_JAVA_FORMAT           | Pass ✅           |
@@ -27,9 +32,6 @@
 | JSONC_PRETTIER               | Pass ✅           |
 | JSX                          | Fail ❌           |
 | JSX_PRETTIER                 | Pass ✅           |
-| JUPYTER_NBQA_BLACK           | Pass ✅           |
-| JUPYTER_NBQA_ISORT           | Pass ✅           |
-| JUPYTER_NBQA_RUFF            | Pass ✅           |
 | KOTLIN                       | Pass ✅           |
 | MARKDOWN                     | Pass ✅           |
 | MARKDOWN_PRETTIER            | Pass ✅           |
@@ -39,14 +41,17 @@
 | PYTHON_BLACK                 | Pass ✅           |
 | PYTHON_ISORT                 | Pass ✅           |
 | PYTHON_RUFF                  | Pass ✅           |
+| PYTHON_RUFF_FORMAT           | Pass ✅           |
 | RUBY                         | Fail ❌           |
 | RUST_2015                    | Pass ✅           |
 | RUST_2018                    | Pass ✅           |
 | RUST_2021                    | Pass ✅           |
+| RUST_2024                    | Pass ✅           |
 | RUST_CLIPPY                  | Pass ✅           |
 | SCALAFMT                     | Pass ✅           |
 | SHELL_SHFMT                  | Pass ✅           |
 | SNAKEMAKE_SNAKEFMT           | Pass ✅           |
+| SPELL_CODESPELL              | Pass ✅           |
 | SQLFLUFF                     | Pass ✅           |
 | TERRAFORM_FMT                | Pass ✅           |
 | TSX                          | Fail ❌           |
@@ -56,6 +61,13 @@
 | VUE_PRETTIER                 | Pass ✅           |
 | YAML_PRETTIER                | Pass ✅           |
 
+<!-- markdownlint-enable MD060 -->
 <!-- textlint-enable terminology -->
 
 Super-linter detected linting errors
+
+For more information, see the Super-linter summary
+(super-linter-output/super-linter-summary.md) and the Super-linter log
+(super-linter.log)
+
+Powered by [Super-linter](https://github.com/super-linter/super-linter)

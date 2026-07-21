@@ -7,46 +7,45 @@
 #########################################
 # Get dependency images as build stages #
 #########################################
-FROM tenable/terrascan:1.19.9 AS terrascan
-FROM alpine/terragrunt:1.12.2 AS terragrunt
-FROM dotenvlinter/dotenv-linter:3.3.0 AS dotenv-linter
-FROM ghcr.io/terraform-linters/tflint:v0.58.1 AS tflint
-FROM alpine/helm:3.18.4 AS helm
-FROM golang:1.24.6-alpine AS golang
-FROM golangci/golangci-lint:v2.3.1 AS golangci-lint
-FROM goreleaser/goreleaser:v2.11.2 AS goreleaser
-FROM hadolint/hadolint:v2.12.0-alpine AS dockerfile-lint
-FROM registry.k8s.io/kustomize/kustomize:v5.7.1 AS kustomize
-FROM hashicorp/terraform:1.12.2 AS terraform
+FROM alpine/terragrunt:1.15.8 AS terragrunt
+FROM dotenvlinter/dotenv-linter:4.0.0 AS dotenv-linter
+FROM ghcr.io/terraform-linters/tflint:v0.64.0 AS tflint
+FROM alpine/helm:4.2.3 AS helm
+FROM golang:1.26.5-alpine AS golang
+FROM golangci/golangci-lint:v2.12.2 AS golangci-lint
+FROM goreleaser/goreleaser:v2.17.0 AS goreleaser
+FROM hadolint/hadolint:v2.14.0-alpine AS dockerfile-lint
+FROM registry.k8s.io/kustomize/kustomize:v5.8.1 AS kustomize
+FROM hashicorp/terraform:1.15.8 AS terraform
 FROM koalaman/shellcheck:v0.11.0 AS shellcheck
-FROM mstruebing/editorconfig-checker:v3.4.0 AS editorconfig-checker
-FROM mvdan/shfmt:v3.12.0 AS shfmt
-FROM rhysd/actionlint:1.7.7 AS actionlint
-FROM scalameta/scalafmt:v3.9.9 AS scalafmt
-FROM zricethezav/gitleaks:v8.28.0 AS gitleaks
-FROM yoheimuta/protolint:0.55.6 AS protolint
-FROM ghcr.io/clj-kondo/clj-kondo:2025.07.28-alpine AS clj-kondo
-FROM dart:3.8.3-sdk AS dart
-FROM mcr.microsoft.com/dotnet/sdk:9.0.304-alpine3.21 AS dotnet-sdk
-FROM mcr.microsoft.com/powershell:7.5-alpine-3.20 AS powershell
-FROM composer/composer:2.8.10 AS php-composer
-FROM ghcr.io/aquasecurity/trivy:0.65.0 AS trivy
+FROM mstruebing/editorconfig-checker:v3.8.0 AS editorconfig-checker
+FROM mvdan/shfmt:v3.13.1 AS shfmt
+FROM rhysd/actionlint:1.7.12 AS actionlint
+FROM scalameta/scalafmt:v3.11.4 AS scalafmt
+FROM zricethezav/gitleaks:v8.30.1 AS gitleaks
+FROM yoheimuta/protolint:0.56.4 AS protolint
+FROM ghcr.io/clj-kondo/clj-kondo:2026.05.25-alpine AS clj-kondo
+FROM dart:3.12.2-sdk AS dart
+FROM mcr.microsoft.com/dotnet/sdk:10.0.302-alpine3.23 AS dotnet-sdk
+FROM composer/composer:2.10.2 AS php-composer
+FROM ghcr.io/aquasecurity/trivy:0.72.0 AS trivy
+FROM ghcr.io/yannh/kubeconform:v0.8.0 AS kubeconform
 
-FROM python:3.13.6-alpine3.22 AS python-base
+FROM python:3.14.6-alpine3.23 AS python-base
 
 FROM python-base AS clang-format
 
 RUN apk add --no-cache \
   build-base \
-  clang20 \
+  clang21 \
   cmake \
   git \
-  llvm20-dev \
+  llvm21-dev \
   ninja-is-really-ninja
 
 WORKDIR /tmp
 RUN git clone \
-  --branch "llvmorg-$(llvm-config  --version)" \
+  --branch "llvmorg-$(llvm21-config  --version)" \
   --depth 1 \
   https://github.com/llvm/llvm-project.git
 
@@ -117,18 +116,17 @@ SHELL ["/bin/bash", "-o", "errexit", "-o", "nounset", "-o", "pipefail", "-c"]
 COPY scripts/install-lintr.sh scripts/install-r-package-or-fail.R /
 RUN /install-lintr.sh && rm -rf /install-lintr.sh /install-r-package-or-fail.R
 
-FROM powershell AS powershell-installer
+FROM dotnet-sdk AS powershell-installer
 
 # Copy the value of the PowerShell install directory to a file so we can reuse it
 # when copying PowerShell stuff in the main image
-RUN echo "${PS_INSTALL_FOLDER}" > /tmp/PS_INSTALL_FOLDER
+RUN dirname "$(readlink -f "$(which pwsh)")" > /tmp/PS_INSTALL_FOLDER
 
 FROM php-composer AS php-linters
 
 COPY dependencies/composer/composer.json dependencies/composer/composer.lock /app/
 
-RUN composer update \
-  && composer audit
+RUN composer update
 
 FROM python-base AS ruby-installer
 
@@ -184,7 +182,7 @@ RUN apk add --no-cache \
   libxml2-utils \
   npm \
   nodejs-current \
-  openjdk17-jre \
+  openjdk21-jre \
   openssh-client \
   parallel \
   perl \
@@ -320,11 +318,6 @@ ENV TFLINT_PLUGIN_DIR="/root/.tflint.d/plugins"
 COPY --from=tflint /usr/local/bin/tflint /usr/bin/
 COPY --from=tflint-plugins "${TFLINT_PLUGIN_DIR}" "${TFLINT_PLUGIN_DIR}"
 
-#####################
-# Install Terrascan #
-#####################
-COPY --from=terrascan /go/bin/terrascan /usr/bin/
-
 ######################
 # Install Terragrunt #
 ######################
@@ -372,6 +365,9 @@ RUN scalafmt --version | awk ' { print $2 }' > /tmp/scalafmt-version.txt
 ######################
 COPY --from=actionlint /usr/local/bin/actionlint /usr/bin/
 
+# Install kubeconform
+COPY --from=kubeconform /kubeconform /usr/bin/
+
 #####################
 # Install clj-kondo #
 #####################
@@ -387,11 +383,12 @@ COPY --from=dart --chmod=0755 \
   "${DART_SDK}"/
 COPY --from=dart --chmod=0755 \
   "${DART_SDK}/bin/dart" \
-  "${DART_SDK}/bin/dart.sym" \
+  "${DART_SDK}/bin/dartaotruntime" \
   "${DART_SDK}/bin"/
 COPY --from=dart --chmod=0755 \
+  "${DART_SDK}/bin/snapshots/analysis_server_aot.dart.snapshot" \
   "${DART_SDK}/bin/snapshots/analysis_server.dart.snapshot" \
-  "${DART_SDK}/bin/snapshots/dartdev.dart.snapshot" \
+  "${DART_SDK}/bin/snapshots/dartdev_aot.dart.snapshot" \
   "${DART_SDK}/bin/snapshots/frontend_server_aot.dart.snapshot" \
   "${DART_SDK}/bin/snapshots"/
 COPY --from=dart --chmod=0755 \
@@ -444,13 +441,14 @@ COPY --from=dotenv-linter /dotenv-linter /usr/bin/
 #########################
 ENV PATH="${PATH}:/venvs/ansible-lint/bin"
 ENV PATH="${PATH}:/venvs/black/bin"
-ENV PATH="${PATH}:/venvs/checkov/bin"
 ENV PATH="${PATH}:/venvs/cfn-lint/bin"
+ENV PATH="${PATH}:/venvs/checkov/bin"
+ENV PATH="${PATH}:/venvs/codespell/bin"
 ENV PATH="${PATH}:/venvs/cpplint/bin"
 ENV PATH="${PATH}:/venvs/flake8/bin"
 ENV PATH="${PATH}:/venvs/isort/bin"
 ENV PATH="${PATH}:/venvs/mypy/bin"
-ENV PATH="${PATH}:/venvs/nbqa/bin"
+ENV PATH="${PATH}:/venvs/pre-commit/bin"
 ENV PATH="${PATH}:/venvs/pylint/bin"
 ENV PATH="${PATH}:/venvs/ruff/bin"
 ENV PATH="${PATH}:/venvs/snakefmt/bin"
@@ -458,6 +456,7 @@ ENV PATH="${PATH}:/venvs/snakemake/bin"
 ENV PATH="${PATH}:/venvs/sqlfluff/bin"
 ENV PATH="${PATH}:/venvs/yamllint/bin"
 ENV PATH="${PATH}:/venvs/yq/bin"
+ENV PATH="${PATH}:/venvs/zizmor/bin"
 ENV PATH="${PATH}:/node_modules/.bin"
 ENV PATH="${PATH}:/usr/lib/go/bin"
 ENV PATH="${PATH}:${DART_SDK}/bin:/root/.pub-cache/bin"
@@ -474,6 +473,11 @@ ENV RENOVATE_X_IGNORE_RE2="true"
 ENV VERSION_FILE="/action/linterVersions.txt"
 RUN mkdir /action
 
+# Define this for all image variants to avoid that commands that depend on this
+# variable don't find it, and throw "unbound variable" errors when the Bash
+# nounset option is enabled.
+ENV ARM_TTK_PSD1="/usr/lib/microsoft/arm-ttk/arm-ttk.psd1"
+
 # create the homedir, so that in case it is not present (like on action-runner-controller based selfhosted runners)
 # we do not fail at setting /github/workspace as a safe git directory
 ENV HOME="/github/home"
@@ -489,6 +493,10 @@ RUN if [ ! -e "/usr/bin/php" ]; then ln -s /usr/bin/php84 /usr/bin/php; fi
 # Keep this in a dedicated RUN instruction for clarity
 # hadolint ignore=DL3059
 RUN git config --system --add safe.directory "*"
+
+# Disable Dart telemetry
+# hadolint ignore=DL3059
+RUN dart --disable-analytics
 
 FROM base_image AS slim
 
@@ -536,7 +544,6 @@ FROM base_image AS standard
 # https://docs.docker.com/engine/reference/builder/#automatic-platform-args-in-the-global-scope
 ARG TARGETARCH
 
-ENV ARM_TTK_PSD1="/usr/lib/microsoft/arm-ttk/arm-ttk.psd1"
 ENV PATH="${PATH}:/var/cache/dotnet/tools:/usr/share/dotnet"
 
 # Install Rust linters
@@ -556,7 +563,7 @@ RUN dotnet help
 # Install Powershell + PSScriptAnalyzer #
 #########################################
 COPY --from=powershell-installer /tmp/PS_INSTALL_FOLDER /tmp/PS_INSTALL_FOLDER
-COPY --from=powershell /opt/microsoft/powershell /opt/microsoft/powershell
+COPY --from=dotnet-sdk /usr/share/powershell /usr/share/powershell
 # Disable Powershell telemetry
 ENV POWERSHELL_TELEMETRY_OPTOUT=1
 ARG PSSA_VERSION='1.24.0'

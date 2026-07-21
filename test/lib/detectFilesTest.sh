@@ -4,11 +4,8 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-# shellcheck disable=SC2034
-LOG_LEVEL="DEBUG"
-
 # shellcheck source=/dev/null
-source "lib/functions/log.sh"
+source "test/testUtils.sh"
 
 # shellcheck source=/dev/null
 source "lib/functions/detectFiles.sh"
@@ -17,7 +14,7 @@ function RecognizeNoShebangTest() {
   local FUNCTION_NAME
   FUNCTION_NAME="${FUNCNAME[0]}"
   info "${FUNCTION_NAME} start"
-  local FILE="test/linters/bash_exec/libraries/noShebang_bad.sh"
+  local FILE="${TEST_DETECT_FILES_SHEBANG_DIRECTORY}/noShebang_bad.sh"
 
   debug "Confirming ${FILE} has no shebang"
 
@@ -32,7 +29,7 @@ RecognizeCommentIsNotShebangTest() {
   local FUNCTION_NAME
   FUNCTION_NAME="${FUNCNAME[0]}"
   info "${FUNCTION_NAME} start"
-  local FILE="test/linters/bash_exec/libraries/comment_bad.sh"
+  local FILE="${TEST_DETECT_FILES_SHEBANG_DIRECTORY}/comment_bad.sh"
 
   debug "Confirming ${FILE} starting with a comment has no shebang"
 
@@ -47,7 +44,7 @@ RecognizeIndentedShebangAsCommentTest() {
   local FUNCTION_NAME
   FUNCTION_NAME="${FUNCNAME[0]}"
   info "${FUNCTION_NAME} start"
-  local FILE="test/linters/bash_exec/libraries/indentedShebang_bad.sh"
+  local FILE="${TEST_DETECT_FILES_SHEBANG_DIRECTORY}/indentedShebang_bad.sh"
 
   debug "Confirming indented shebang in ${FILE} is considered a comment"
 
@@ -62,7 +59,7 @@ RecognizeSecondLineShebangAsCommentTest() {
   local FUNCTION_NAME
   FUNCTION_NAME="${FUNCNAME[0]}"
   info "${FUNCTION_NAME} start"
-  local FILE="test/linters/bash_exec/libraries/secondLineShebang_bad.sh"
+  local FILE="${TEST_DETECT_FILES_SHEBANG_DIRECTORY}/secondLineShebang_bad.sh"
 
   debug "Confirming shebang on second line in ${FILE} is considered a comment"
 
@@ -77,7 +74,7 @@ function RecognizeShebangTest() {
   local FUNCTION_NAME
   FUNCTION_NAME="${FUNCNAME[0]}"
   info "${FUNCTION_NAME} start"
-  local FILE="test/linters/bash_exec/libraries/shebang_bad.sh"
+  local FILE="${TEST_DETECT_FILES_SHEBANG_DIRECTORY}/shebang_bad.sh"
 
   debug "Confirming ${FILE} has a shebang"
 
@@ -92,7 +89,7 @@ function RecognizeShebangWithBlankTest() {
   local FUNCTION_NAME
   FUNCTION_NAME="${FUNCNAME[0]}"
   info "${FUNCTION_NAME} start"
-  local FILE="test/linters/bash_exec/libraries/shebangWithBlank_bad.sh"
+  local FILE="${TEST_DETECT_FILES_SHEBANG_DIRECTORY}/shebangWithBlank_bad.sh"
 
   debug "Confirming shebang with blank in ${FILE} is recognized"
 
@@ -154,6 +151,143 @@ function RecognizeSymbolicLink() {
   notice "${FUNCTION_NAME} PASS"
 }
 
+DetectGitHubActionsWorkflowsTest() {
+  local FUNCTION_NAME
+  FUNCTION_NAME="${FUNCNAME[0]}"
+  info "${FUNCTION_NAME} start"
+
+  local VALIDATE_GITHUB_ACTIONS
+  local VALIDATE_GITHUB_ACTIONS_ZIZMOR
+
+  VALIDATE_GITHUB_ACTIONS="false"
+  VALIDATE_GITHUB_ACTIONS_ZIZMOR=""
+  if DetectGitHubActionsWorkflows ""; then
+    fatal "${FUNCTION_NAME} should have returned a non-zero exit code when VALIDATE_GITHUB_ACTIONS is ${VALIDATE_GITHUB_ACTIONS}"
+  fi
+
+  VALIDATE_GITHUB_ACTIONS=""
+  VALIDATE_GITHUB_ACTIONS_ZIZMOR="false"
+  if DetectGitHubActionsWorkflows ""; then
+    fatal "${FUNCTION_NAME} should have returned a non-zero exit code when VALIDATE_GITHUB_ACTIONS_ZIZMOR is ${VALIDATE_GITHUB_ACTIONS_ZIZMOR}"
+  fi
+
+  VALIDATE_GITHUB_ACTIONS="true"
+  VALIDATE_GITHUB_ACTIONS_ZIZMOR="true"
+  if DetectGitHubActionsWorkflows ""; then
+    fatal "${FUNCTION_NAME} should have failed when passing an empty path"
+  fi
+
+  VALIDATE_GITHUB_ACTIONS="true"
+  VALIDATE_GITHUB_ACTIONS_ZIZMOR="true"
+  local GITHUB_ACTIONS_TEST_FILE_PATH
+  GITHUB_ACTIONS_TEST_FILE_PATH="workspace/.github/workflows/test.yaml"
+  if ! DetectGitHubActionsWorkflows "${GITHUB_ACTIONS_TEST_FILE_PATH}"; then
+    fatal "${FUNCTION_NAME} should have passed when processing ${GITHUB_ACTIONS_TEST_FILE_PATH}"
+  fi
+
+  VALIDATE_GITHUB_ACTIONS="true"
+  VALIDATE_GITHUB_ACTIONS_ZIZMOR="true"
+  GITHUB_ACTIONS_TEST_FILE_PATH="${TEST_CASE_FOLDER}/github_actions/test.yaml"
+  if ! DetectGitHubActionsWorkflows "${GITHUB_ACTIONS_TEST_FILE_PATH}"; then
+    fatal "${FUNCTION_NAME} should have passed when processing ${GITHUB_ACTIONS_TEST_FILE_PATH}"
+  fi
+
+  unset VALIDATE_GITHUB_ACTIONS
+  unset VALIDATE_GITHUB_ACTIONS_ZIZMOR
+
+  notice "${FUNCTION_NAME} PASS"
+}
+
+DetectDependabotTest() {
+  local FUNCTION_NAME
+  FUNCTION_NAME="${FUNCNAME[0]}"
+  info "${FUNCTION_NAME} start"
+
+  local VALIDATE_GITHUB_ACTIONS_ZIZMOR
+  VALIDATE_GITHUB_ACTIONS_ZIZMOR="false"
+  if DetectDependabot "test/file/path"; then
+    fatal "${FUNCTION_NAME} should have returned a non-zero exit code when VALIDATE_GITHUB_ACTIONS_ZIZMOR is ${VALIDATE_GITHUB_ACTIONS_ZIZMOR}"
+  fi
+
+  VALIDATE_GITHUB_ACTIONS_ZIZMOR="true"
+
+  local GITHUB_ACTIONS_TEST_FILE_PATH
+
+  GITHUB_ACTIONS_TEST_FILE_PATH=".github/dependabot.yml"
+  if ! DetectDependabot "${GITHUB_ACTIONS_TEST_FILE_PATH}"; then
+    fatal "${FUNCTION_NAME} should have passed when processing ${GITHUB_ACTIONS_TEST_FILE_PATH}"
+  fi
+
+  GITHUB_ACTIONS_TEST_FILE_PATH=".github/dependabot.yaml"
+  if ! DetectDependabot "${GITHUB_ACTIONS_TEST_FILE_PATH}"; then
+    fatal "${FUNCTION_NAME} should have passed when processing ${GITHUB_ACTIONS_TEST_FILE_PATH}"
+  fi
+
+  GITHUB_ACTIONS_TEST_FILE_PATH="workspace/.github/dependabot.yml"
+  if ! DetectDependabot "${GITHUB_ACTIONS_TEST_FILE_PATH}"; then
+    fatal "${FUNCTION_NAME} should have passed when processing ${GITHUB_ACTIONS_TEST_FILE_PATH}"
+  fi
+
+  GITHUB_ACTIONS_TEST_FILE_PATH="workspace/.github/dependabot.yaml"
+  if ! DetectDependabot "${GITHUB_ACTIONS_TEST_FILE_PATH}"; then
+    fatal "${FUNCTION_NAME} should have passed when processing ${GITHUB_ACTIONS_TEST_FILE_PATH}"
+  fi
+
+  unset VALIDATE_GITHUB_ACTIONS_ZIZMOR
+
+  notice "${FUNCTION_NAME} PASS"
+}
+
+DetectGitHubActionsTest() {
+  local FUNCTION_NAME
+  FUNCTION_NAME="${FUNCNAME[0]}"
+  info "${FUNCTION_NAME} start"
+
+  local VALIDATE_GITHUB_ACTIONS_ZIZMOR
+  VALIDATE_GITHUB_ACTIONS_ZIZMOR="false"
+  if DetectGitHubActions "test/file/path"; then
+    fatal "${FUNCTION_NAME} should have returned a non-zero exit code when VALIDATE_GITHUB_ACTIONS_ZIZMOR is ${VALIDATE_GITHUB_ACTIONS_ZIZMOR}"
+  fi
+
+  VALIDATE_GITHUB_ACTIONS_ZIZMOR="true"
+
+  local GITHUB_ACTIONS_TEST_FILE_PATH
+
+  GITHUB_ACTIONS_TEST_FILE_PATH="action.yml"
+  if ! DetectGitHubActions "${GITHUB_ACTIONS_TEST_FILE_PATH}"; then
+    fatal "${FUNCTION_NAME} should have passed when processing ${GITHUB_ACTIONS_TEST_FILE_PATH}"
+  fi
+
+  GITHUB_ACTIONS_TEST_FILE_PATH="action.yaml"
+  if ! DetectGitHubActions "${GITHUB_ACTIONS_TEST_FILE_PATH}"; then
+    fatal "${FUNCTION_NAME} should have passed when processing ${GITHUB_ACTIONS_TEST_FILE_PATH}"
+  fi
+
+  GITHUB_ACTIONS_TEST_FILE_PATH=".github/action.yml"
+  if ! DetectGitHubActions "${GITHUB_ACTIONS_TEST_FILE_PATH}"; then
+    fatal "${FUNCTION_NAME} should have passed when processing ${GITHUB_ACTIONS_TEST_FILE_PATH}"
+  fi
+
+  GITHUB_ACTIONS_TEST_FILE_PATH=".github/action.yaml"
+  if ! DetectGitHubActions "${GITHUB_ACTIONS_TEST_FILE_PATH}"; then
+    fatal "${FUNCTION_NAME} should have passed when processing ${GITHUB_ACTIONS_TEST_FILE_PATH}"
+  fi
+
+  GITHUB_ACTIONS_TEST_FILE_PATH="workspace/.github/action.yml"
+  if ! DetectGitHubActions "${GITHUB_ACTIONS_TEST_FILE_PATH}"; then
+    fatal "${FUNCTION_NAME} should have passed when processing ${GITHUB_ACTIONS_TEST_FILE_PATH}"
+  fi
+
+  GITHUB_ACTIONS_TEST_FILE_PATH="workspace/.github/action.yaml"
+  if ! DetectGitHubActions "${GITHUB_ACTIONS_TEST_FILE_PATH}"; then
+    fatal "${FUNCTION_NAME} should have passed when processing ${GITHUB_ACTIONS_TEST_FILE_PATH}"
+  fi
+
+  unset VALIDATE_GITHUB_ACTIONS_ZIZMOR
+
+  notice "${FUNCTION_NAME} PASS"
+}
+
 RecognizeNoShebangTest
 RecognizeCommentIsNotShebangTest
 RecognizeIndentedShebangAsCommentTest
@@ -164,3 +298,7 @@ RecognizeNotSymbolicLink
 RecognizeSymbolicLink
 
 IsAnsibleDirectoryTest
+
+DetectGitHubActionsWorkflowsTest
+DetectDependabotTest
+DetectGitHubActionsTest

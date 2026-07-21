@@ -4,12 +4,8 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-# Default log level
-# shellcheck disable=SC2034
-LOG_LEVEL="DEBUG"
-
 # shellcheck source=/dev/null
-source "lib/functions/log.sh"
+source "test/testUtils.sh"
 
 # shellcheck source=/dev/null
 source "lib/functions/validation.sh"
@@ -22,7 +18,13 @@ function GetGithubPushEventCommitCountTest() {
   info "${FUNCTION_NAME} start"
 
   local GITHUB_EVENT_COMMIT_COUNT
-  GITHUB_EVENT_COMMIT_COUNT=$(GetGithubPushEventCommitCount "test/data/github-event/github-event-push.json")
+  set +o errexit
+  GITHUB_EVENT_COMMIT_COUNT="$(GetGithubPushEventCommitCount "test/data/github-event/github-event-push.json")"
+  RET_CODE=$?
+  set -o errexit
+  if [[ "${RET_CODE}" -gt 0 ]]; then
+    fatal "Failed to get commit count from GitHub push event. Output: ${GITHUB_EVENT_COMMIT_COUNT}"
+  fi
 
   debug "GITHUB_EVENT_COMMIT_COUNT: ${GITHUB_EVENT_COMMIT_COUNT}"
 
@@ -34,6 +36,30 @@ function GetGithubPushEventCommitCountTest() {
 }
 
 GetGithubPushEventCommitCountTest
+
+GetGitHubEventPushBeforeTest() {
+  local FUNCTION_NAME
+  FUNCTION_NAME="${FUNCNAME[0]}"
+  info "${FUNCTION_NAME} start"
+
+  local GITHUB_PUSH_BEFORE
+  if ! GITHUB_PUSH_BEFORE=$(GetGitHubEventPushBefore "test/data/github-event/github-event-push.json"); then
+    fatal "Error while setting GITHUB_PUSH_BEFORE"
+  fi
+
+  debug "GITHUB_PUSH_BEFORE: ${GITHUB_PUSH_BEFORE}"
+
+  local EXPECTED_GITHUB_PUSH_BEFORE
+  EXPECTED_GITHUB_PUSH_BEFORE="${GITHUB_SHA_ALL_ZEROES}"
+
+  if [ "${GITHUB_PUSH_BEFORE}" != "${EXPECTED_GITHUB_PUSH_BEFORE}" ]; then
+    fatal "GITHUB_PUSH_BEFORE (${GITHUB_PUSH_BEFORE}) is not equal to: ${EXPECTED_GITHUB_PUSH_BEFORE}"
+  fi
+
+  notice "${FUNCTION_NAME} PASS"
+}
+
+GetGitHubEventPushBeforeTest
 
 function GetGithubPullRequestEventCommitCountTest() {
   local FUNCTION_NAME
@@ -66,7 +92,9 @@ function GetGithubRepositoryDefaultBranchTest() {
   info "${FUNCTION_NAME} start"
 
   local GITHUB_REPOSITORY_DEFAULT_BRANCH
-  GITHUB_REPOSITORY_DEFAULT_BRANCH=$(GetGithubRepositoryDefaultBranch "test/data/github-event/github-event-push.json")
+  if ! GITHUB_REPOSITORY_DEFAULT_BRANCH=$(GetGithubRepositoryDefaultBranch "test/data/github-event/github-event-push.json"); then
+    fatal "Error while setting GITHUB_REPOSITORY_DEFAULT_BRANCH"
+  fi
 
   debug "GITHUB_REPOSITORY_DEFAULT_BRANCH: ${GITHUB_REPOSITORY_DEFAULT_BRANCH}"
 
@@ -88,12 +116,14 @@ function GetPullRequestHeadShaTest() {
   info "${FUNCTION_NAME} start"
 
   local GITHUB_PULL_REQUEST_HEAD_SHA
-  GITHUB_PULL_REQUEST_HEAD_SHA=$(GetPullRequestHeadSha "test/data/github-event/github-event-pull-request-multiple-commits.json")
+  if ! GITHUB_PULL_REQUEST_HEAD_SHA=$(GetPullRequestHeadSha "test/data/github-event/github-event-pull-request-multiple-commits.json"); then
+    fatal "Failed to get pull request HEAD SHA"
+  fi
 
   debug "GITHUB_PULL_REQUEST_HEAD_SHA: ${GITHUB_PULL_REQUEST_HEAD_SHA}"
 
   local EXPECTED_GITHUB_PULL_REQUEST_HEAD_SHA
-  EXPECTED_GITHUB_PULL_REQUEST_HEAD_SHA="fa386af5d523fabb5df5d1bae53b8984dfbf4ff0"
+  EXPECTED_GITHUB_PULL_REQUEST_HEAD_SHA="pull-request-head-sha"
 
   if [ "${GITHUB_PULL_REQUEST_HEAD_SHA}" != "${EXPECTED_GITHUB_PULL_REQUEST_HEAD_SHA}" ]; then
     fatal "GITHUB_PULL_REQUEST_HEAD_SHA (${GITHUB_PULL_REQUEST_HEAD_SHA}) is not equal to: ${EXPECTED_GITHUB_PULL_REQUEST_HEAD_SHA}"
@@ -103,3 +133,91 @@ function GetPullRequestHeadShaTest() {
 }
 
 GetPullRequestHeadShaTest
+
+GetPullRequestNumberTest() {
+  local FUNCTION_NAME
+  FUNCTION_NAME="${FUNCNAME[0]}"
+  info "${FUNCTION_NAME} start"
+
+  local GITHUB_PULL_REQUEST_NUMBER
+  if ! GITHUB_PULL_REQUEST_NUMBER=$(GetPullRequestNumber "test/data/github-event/github-event-pull-request-multiple-commits.json"); then
+    fatal "Failed to get pull request number"
+  fi
+
+  debug "GITHUB_PULL_REQUEST_NUMBER: ${GITHUB_PULL_REQUEST_NUMBER}"
+
+  local EXPECTED_GITHUB_PULL_REQUEST_NUMBER
+  EXPECTED_GITHUB_PULL_REQUEST_NUMBER="6637"
+
+  if [ "${GITHUB_PULL_REQUEST_NUMBER}" != "${EXPECTED_GITHUB_PULL_REQUEST_NUMBER}" ]; then
+    fatal "GITHUB_PULL_REQUEST_NUMBER (${GITHUB_PULL_REQUEST_NUMBER}) is not equal to: ${EXPECTED_GITHUB_PULL_REQUEST_NUMBER}"
+  fi
+
+  notice "${FUNCTION_NAME} PASS"
+}
+GetPullRequestNumberTest
+
+GetGitHubEventForcedTest() {
+  local FUNCTION_NAME
+  FUNCTION_NAME="${FUNCNAME[0]}"
+  info "${FUNCTION_NAME} start"
+
+  local GITHUB_PUSH_FORCED
+  if ! GITHUB_PUSH_FORCED="$(GetGitHubEventForced "test/data/github-event/github-event-push.json")"; then
+    fatal "Error while setting GITHUB_PUSH_FORCED"
+  fi
+
+  debug "GITHUB_PUSH_FORCED: ${GITHUB_PUSH_FORCED}"
+
+  local EXPECTED_GITHUB_PUSH_FORCED
+  EXPECTED_GITHUB_PUSH_FORCED="false"
+
+  if [ "${GITHUB_PUSH_FORCED}" != "${EXPECTED_GITHUB_PUSH_FORCED}" ]; then
+    fatal "GITHUB_PUSH_FORCED (${GITHUB_PUSH_FORCED}) is not equal to: ${EXPECTED_GITHUB_PUSH_FORCED}"
+  fi
+
+  notice "${FUNCTION_NAME} PASS"
+}
+
+GetGitHubEventForcedTest
+
+GetGithubPushFirstPushedCommitHashTest() {
+  local FUNCTION_NAME
+  FUNCTION_NAME="${FUNCNAME[0]}"
+  info "${FUNCTION_NAME} start"
+
+  local GITHUB_FIRST_PUSHED_COMMIT
+  local EXPECTED_GITHUB_FIRST_PUSHED_COMMIT
+  local EVENT_PATH
+
+  GITHUB_FIRST_PUSHED_COMMIT=""
+  EVENT_PATH="test/data/github-event/github-event-push.json"
+  EXPECTED_GITHUB_FIRST_PUSHED_COMMIT="first-pushed-commit-hash"
+
+  if ! GITHUB_FIRST_PUSHED_COMMIT="$(GetGithubPushFirstPushedCommitHash "${EVENT_PATH}")"; then
+    fatal "Error while setting GITHUB_FIRST_PUSHED_COMMIT"
+  fi
+
+  debug "GITHUB_FIRST_PUSHED_COMMIT (${EVENT_PATH}): ${GITHUB_FIRST_PUSHED_COMMIT}"
+
+  if [ "${GITHUB_FIRST_PUSHED_COMMIT}" != "${EXPECTED_GITHUB_FIRST_PUSHED_COMMIT}" ]; then
+    fatal "GITHUB_FIRST_PUSHED_COMMIT (${GITHUB_FIRST_PUSHED_COMMIT}) is not equal to the expected value: ${EXPECTED_GITHUB_FIRST_PUSHED_COMMIT}"
+  fi
+
+  GITHUB_FIRST_PUSHED_COMMIT=""
+  EVENT_PATH="test/data/github-event/github-event-push-tag-merge-commit.json"
+  EXPECTED_GITHUB_FIRST_PUSHED_COMMIT="null"
+
+  if ! GITHUB_FIRST_PUSHED_COMMIT="$(GetGithubPushFirstPushedCommitHash "${EVENT_PATH}")"; then
+    fatal "Error while setting GITHUB_FIRST_PUSHED_COMMIT"
+  fi
+
+  debug "GITHUB_FIRST_PUSHED_COMMIT (${EVENT_PATH}): ${GITHUB_FIRST_PUSHED_COMMIT}"
+
+  if [ "${GITHUB_FIRST_PUSHED_COMMIT}" != "${EXPECTED_GITHUB_FIRST_PUSHED_COMMIT}" ]; then
+    fatal "GITHUB_FIRST_PUSHED_COMMIT (${GITHUB_FIRST_PUSHED_COMMIT}) is not equal to the expected value: ${EXPECTED_GITHUB_FIRST_PUSHED_COMMIT}"
+  fi
+
+  notice "${FUNCTION_NAME} PASS"
+}
+GetGithubPushFirstPushedCommitHashTest

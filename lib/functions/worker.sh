@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
 function LintCodebase() {
+  set -o nounset
+  set -o pipefail
+
   local FILE_TYPE
   FILE_TYPE="${1}" && shift
   local TEST_CASE_RUN
@@ -8,6 +11,9 @@ function LintCodebase() {
 
   declare -n VALIDATE_LANGUAGE
   VALIDATE_LANGUAGE="VALIDATE_${FILE_TYPE}"
+
+  ValidateBooleanVariable "TEST_CASE_RUN" "${TEST_CASE_RUN}"
+  ValidateBooleanVariable "VALIDATE_${FILE_TYPE}" "${VALIDATE_LANGUAGE}"
 
   if [[ "${VALIDATE_LANGUAGE}" == "false" ]]; then
     if [[ "${TEST_CASE_RUN}" == "false" ]]; then
@@ -28,16 +34,13 @@ function LintCodebase() {
 
   debug "VALIDATE_LANGUAGE for ${FILE_TYPE}: ${VALIDATE_LANGUAGE}..."
 
-  ValidateBooleanVariable "TEST_CASE_RUN" "${TEST_CASE_RUN}"
-  ValidateBooleanVariable "VALIDATE_${FILE_TYPE}" "${VALIDATE_LANGUAGE}"
-
   unset -n VALIDATE_LANGUAGE
 
   debug "Populating file array for ${FILE_TYPE}"
   local -n FILE_ARRAY="FILE_ARRAY_${FILE_TYPE}"
   local FILE_ARRAY_LANGUAGE_PATH="${FILE_ARRAYS_DIRECTORY_PATH}/file-array-${FILE_TYPE}"
+  FILE_ARRAY=()
   if [[ -e "${FILE_ARRAY_LANGUAGE_PATH}" ]]; then
-    FILE_ARRAY=()
     while read -r FILE; do
       if [[ "${TEST_CASE_RUN}" == "true" ]]; then
         debug "Ensure that the list files to check for ${FILE_TYPE} doesn't include test cases for other languages"
@@ -50,7 +53,7 @@ function LintCodebase() {
         # In this case, we don't add a trailing slash so we don't fail validation.
         if [[ "${FILE_TYPE}" != "CHECKOV" ]]; then
           TEST_CASE_DIRECTORY="${TEST_CASE_DIRECTORY}/"
-          debug "Adding a traling slash to the test case directory for ${FILE_TYPE}: ${TEST_CASE_DIRECTORY}"
+          debug "Adding a trailing slash to the test case directory for ${FILE_TYPE}: ${TEST_CASE_DIRECTORY}"
         fi
 
         debug "TEST_CASE_DIRECTORY for ${FILE_TYPE}: ${TEST_CASE_DIRECTORY}"
@@ -79,8 +82,6 @@ function LintCodebase() {
     debug "There are ${#FILE_ARRAY[@]} items to lint for ${FILE_TYPE}: ${FILE_ARRAY[*]}"
   fi
 
-  startGitHubActionsLogGroup "${FILE_TYPE}"
-
   info "Linting ${FILE_TYPE} items..."
 
   local PARALLEL_RESULTS_FILE_PATH
@@ -91,8 +92,8 @@ function LintCodebase() {
   PARALLEL_COMMAND=(parallel --will-cite --keep-order --max-procs "$(($(nproc) * 1))" --xargs --results "${PARALLEL_RESULTS_FILE_PATH}")
 
   if [ "${LOG_DEBUG}" == "true" ]; then
-    debug "LOG_DEBUG is enabled. Enable verbose ouput for parallel"
-    PARALLEL_COMMAND+=(--verbose)
+    debug "LOG_DEBUG is enabled. Enable verbose output for parallel"
+    PARALLEL_COMMAND+=(-v)
   fi
   debug "PARALLEL_COMMAND for ${FILE_TYPE}: ${PARALLEL_COMMAND[*]}"
 
@@ -101,24 +102,24 @@ function LintCodebase() {
   if [[ "${FILE_TYPE}" == "ANSIBLE" ]] ||
     [[ "${FILE_TYPE}" == "ARM" ]] ||
     [[ "${FILE_TYPE}" == "BASH_EXEC" ]] ||
+    [[ "${FILE_TYPE}" == "CHECKOV" ]] ||
     [[ "${FILE_TYPE}" == "CLOJURE" ]] ||
     [[ "${FILE_TYPE}" == "CSHARP" ]] ||
     [[ "${FILE_TYPE}" == "DOTNET_SLN_FORMAT_ANALYZERS" ]] ||
     [[ "${FILE_TYPE}" == "DOTNET_SLN_FORMAT_STYLE" ]] ||
     [[ "${FILE_TYPE}" == "DOTNET_SLN_FORMAT_WHITESPACE" ]] ||
+    [[ "${FILE_TYPE}" == "GIT_COMMITLINT" ]] ||
     [[ "${FILE_TYPE}" == "GITLEAKS" ]] ||
     [[ "${FILE_TYPE}" == "GO_MODULES" ]] ||
     [[ "${FILE_TYPE}" == "JSCPD" ]] ||
     [[ "${FILE_TYPE}" == "KOTLIN" ]] ||
-    [[ "${FILE_TYPE}" == "SQLFLUFF" ]] ||
-    [[ "${FILE_TYPE}" == "CHECKOV" ]] ||
     [[ "${FILE_TYPE}" == "POWERSHELL" ]] ||
     [[ "${FILE_TYPE}" == "R" ]] ||
     [[ "${FILE_TYPE}" == "RUST_CLIPPY" ]] ||
     [[ "${FILE_TYPE}" == "SNAKEMAKE_LINT" ]] ||
+    [[ "${FILE_TYPE}" == "SQLFLUFF" ]] ||
     [[ "${FILE_TYPE}" == "STATES" ]] ||
     [[ "${FILE_TYPE}" == "TERRAFORM_TFLINT" ]] ||
-    [[ "${FILE_TYPE}" == "TERRAFORM_TERRASCAN" ]] ||
     [[ "${FILE_TYPE}" == "TERRAGRUNT" ]]; then
     debug "${FILE_TYPE} doesn't support linting files in batches. Configure the linter to run over the files to lint one by one"
     PARALLEL_COMMAND+=(--max-lines 1)
@@ -139,7 +140,12 @@ function LintCodebase() {
     [[ ${FILE_TYPE} == "RUST_CLIPPY" ]] ||
     [[ ${FILE_TYPE} == "TERRAFORM_TFLINT" ]]; then
     LINTER_WORKING_DIRECTORY="{//}"
+  # Biome: it runs against the entire workspace, but we need to change the
+  # the working directory when running test cases, so we can pick a
+  # configuration that doesn't ignore the test/data directory
   elif [[ ${FILE_TYPE} == "ANSIBLE" ]] ||
+    [[ ${FILE_TYPE} == "BIOME_FORMAT" ]] ||
+    [[ ${FILE_TYPE} == "BIOME_LINT" ]] ||
     [[ ${FILE_TYPE} == "GO_MODULES" ]] ||
     [[ ${FILE_TYPE} == "TRIVY" ]]; then
     LINTER_WORKING_DIRECTORY="{}"
@@ -153,16 +159,6 @@ function LintCodebase() {
   if ! source /action/lib/functions/linterCommands.sh; then
     fatal "Error while sourcing linter commands"
   fi
-  # Dynamically add arguments and commands to each linter command as needed
-  if ! InitFixModeOptionsAndCommands "${FILE_TYPE}"; then
-    fatal "Error while inizializing fix mode and check only options and commands before running linter for ${FILE_TYPE}"
-  fi
-  InitInputConsumeCommands
-
-  if [[ "${FILE_TYPE}" == "POWERSHELL" ]]; then
-    debug "Language: ${FILE_TYPE}. Initialize PowerShell command"
-    InitPowerShellCommand
-  fi
 
   local -n LINTER_COMMAND_ARRAY
   LINTER_COMMAND_ARRAY="LINTER_COMMANDS_ARRAY_${FILE_TYPE}"
@@ -172,8 +168,48 @@ function LintCodebase() {
     debug "LINTER_COMMAND_ARRAY for ${FILE_TYPE} has ${#LINTER_COMMAND_ARRAY[@]} elements: ${LINTER_COMMAND_ARRAY[*]}"
   fi
 
+  if [[ "${FILE_TYPE}" == "ARM" ]] ||
+    [[ "${FILE_TYPE}" == "POWERSHELL" ]]; then
+    # Explicitly add a GNU Parallel replacement string before wrapping the
+    # command in the Powershell executable and before appending fix mode options
+    LINTER_COMMAND_ARRAY+=("'{}'")
+  fi
+
+  # Dynamically add arguments and commands to each linter command as needed
+  if ! InitFixModeOptionsAndCommands "${FILE_TYPE}"; then
+    fatal "Error while initializing fix mode and check only options and commands before running linter for ${FILE_TYPE}"
+  fi
+
   # From GNU Parallel manpage (https://www.gnu.org/software/parallel/parallel.html#options)
   # "If the command line contains no replacement strings then {} will be appended to the command line."
+  # shellcheck disable=SC2016 # Don't expand $_ on purpose because we want Parallel to interpret it instead of the shell
+  local INPUT_CONSUME_COMMAND='# {= $_="" =}'
+  if [[ "${FILE_TYPE}" == "ANSIBLE" ]] ||
+    [[ "${FILE_TYPE}" == "GO_MODULE" ]] ||
+    [[ "${FILE_TYPE}" == "PRE_COMMIT" ]] ||
+    [[ "${FILE_TYPE}" == "RUST_CLIPPY" ]]; then
+    # These commands don't accept passing a path as input, so add a no-op (a comment)
+    # so that GNU Parallel doesn't automatically add the default replacement
+    # string
+    LINTER_COMMAND_ARRAY+=("${INPUT_CONSUME_COMMAND}")
+  elif [[ "${FILE_TYPE}" == "CHECKOV" ]]; then
+    # For checkov, add the no-op command only if it loads the list of directories
+    # to check from the configuration file
+    if CheckovConfigurationFileContainsDirectoryOption "${CHECKOV_LINTER_RULES}"; then
+      LINTER_COMMAND_ARRAY+=("${INPUT_CONSUME_COMMAND}")
+    else
+      LINTER_COMMAND_ARRAY+=("${CHECKOV_DIRECTORY_OPTIONS[@]}")
+    fi
+  fi
+
+  if [[ "${FILE_TYPE}" == "ARM" ]] ||
+    [[ "${FILE_TYPE}" == "POWERSHELL" ]]; then
+    # Run as a Powershell command
+    LINTER_COMMAND_ARRAY=(pwsh -NoProfile -NoLogo -Command "\"\\\$PSStyle.OutputRendering = 'Ansi'; ${LINTER_COMMAND_ARRAY[*]} | Out-String; if (\\\${Error}.Count) { exit 1 }\"")
+  fi
+
+  debug "LINTER_COMMAND_ARRAY for ${FILE_TYPE} has ${#LINTER_COMMAND_ARRAY[@]} elements after initializing command arguments: ${LINTER_COMMAND_ARRAY[*]}"
+
   PARALLEL_COMMAND+=("${LINTER_COMMAND_ARRAY[@]}")
   debug "PARALLEL_COMMAND for ${FILE_TYPE} after LINTER_COMMAND_ARRAY concatenation: ${PARALLEL_COMMAND[*]}"
 
@@ -188,12 +224,6 @@ function LintCodebase() {
   debug "Parallel output file (${PARALLEL_RESULTS_FILE_PATH}) contents for ${FILE_TYPE}:\n$(cat "${PARALLEL_RESULTS_FILE_PATH}")"
 
   echo ${PARALLEL_COMMAND_RETURN_CODE} >"${SUPER_LINTER_PRIVATE_OUTPUT_DIRECTORY_PATH}/super-linter-parallel-command-exit-code-${FILE_TYPE}"
-
-  if [ ${PARALLEL_COMMAND_RETURN_CODE} -ne 0 ]; then
-    error "Found errors when linting ${FILE_TYPE}. Exit code: ${PARALLEL_COMMAND_RETURN_CODE}."
-  else
-    notice "${FILE_TYPE} linted successfully"
-  fi
 
   local RESULTS_OBJECT
   RESULTS_OBJECT=
@@ -216,48 +246,48 @@ function LintCodebase() {
     fatal "Error when loading stdout for ${FILE_TYPE}:\n${STDOUT_LINTER}"
   fi
 
-  # Load output functions because we might need to process stdout and stderr
-  # shellcheck source=/dev/null
-  source /action/lib/functions/output.sh
-
-  if [ -n "${STDOUT_LINTER}" ]; then
-    info "Command output for ${FILE_TYPE}:\n------\n${STDOUT_LINTER}\n------"
-
-    local STDOUT_LINTER_FILE_PATH
-    STDOUT_LINTER_FILE_PATH="${SUPER_LINTER_PRIVATE_OUTPUT_DIRECTORY_PATH}/super-linter-parallel-stdout-${FILE_TYPE}"
-    debug "Saving stdout for ${FILE_TYPE} to ${STDOUT_LINTER_FILE_PATH} in case we need it later"
-    printf '%s\n' "${STDOUT_LINTER}" >"${STDOUT_LINTER_FILE_PATH}"
-    if [[ "${REMOVE_ANSI_COLOR_CODES_FROM_OUTPUT}" == "true" ]] &&
-      ! RemoveAnsiColorCodesFromFile "${STDOUT_LINTER_FILE_PATH}"; then
-      fatal "Error while removing ANSI color codes from ${STDOUT_LINTER_FILE_PATH}"
-    fi
-  else
-    debug "Stdout for ${FILE_TYPE} is empty"
-  fi
-
   local STDERR_LINTER
   if ! STDERR_LINTER="$(jq --raw-output '.[] | select(.Stderr[:-1] | length > 0) | .Stderr[:-1]' <<<"${RESULTS_OBJECT}")"; then
     fatal "Error when loading stderr for ${FILE_TYPE}:\n${STDERR_LINTER}"
   fi
 
-  if [ -n "${STDERR_LINTER}" ]; then
-    info "Stderr contents for ${FILE_TYPE}:\n------\n${STDERR_LINTER}\n------"
+  # Load output functions because we might need to process stdout and stderr
+  # shellcheck source=/dev/null
+  source /action/lib/functions/output.sh
 
-    local STDERR_LINTER_FILE_PATH
-    STDERR_LINTER_FILE_PATH="${SUPER_LINTER_PRIVATE_OUTPUT_DIRECTORY_PATH}/super-linter-parallel-stderr-${FILE_TYPE}"
-    debug "Saving stderr for ${FILE_TYPE} to ${STDERR_LINTER_FILE_PATH} in case we need it later"
-    printf '%s\n' "${STDERR_LINTER}" >"${STDERR_LINTER_FILE_PATH}"
-    if [[ "${REMOVE_ANSI_COLOR_CODES_FROM_OUTPUT}" == "true" ]] &&
-      ! RemoveAnsiColorCodesFromFile "${STDERR_LINTER_FILE_PATH}"; then
-      fatal "Error while removing ANSI color codes from ${STDERR_LINTER_FILE_PATH}"
-    fi
+  # At this point, we have all the info to process outputs
+
+  if [ ${PARALLEL_COMMAND_RETURN_CODE} -ne 0 ]; then
+    error "Found errors when linting ${FILE_TYPE}. Exit code: ${PARALLEL_COMMAND_RETURN_CODE}."
   else
-    debug "Stderr for ${FILE_TYPE} is empty"
+    info "${FILE_TYPE} linted successfully"
   fi
 
-  unset -n FILE_ARRAY
+  local -A LINTER_OUTPUTS
+  LINTER_OUTPUTS["stdout"]="${STDOUT_LINTER:-""}"
+  LINTER_OUTPUTS["stderr"]="${STDERR_LINTER:-""}"
 
-  endGitHubActionsLogGroup "${FILE_TYPE}"
+  local LINTER_OUTPUT
+  local LINTER_OUTPUT_CONTENTS
+  for LINTER_OUTPUT in "${!LINTER_OUTPUTS[@]}"; do
+    LINTER_OUTPUT_CONTENTS="${LINTER_OUTPUTS["${LINTER_OUTPUT}"]}"
+    if [[ -n "${LINTER_OUTPUT_CONTENTS}" ]]; then
+      info "Command ${LINTER_OUTPUT} for ${FILE_TYPE}:\n------\n${LINTER_OUTPUT_CONTENTS}\n------"
+
+      local OUTPUT_LINTER_FILE_PATH
+      OUTPUT_LINTER_FILE_PATH="${SUPER_LINTER_PRIVATE_OUTPUT_DIRECTORY_PATH}/super-linter-parallel-${LINTER_OUTPUT}-${FILE_TYPE}"
+      debug "Saving ${LINTER_OUTPUT} for ${FILE_TYPE} to ${OUTPUT_LINTER_FILE_PATH} in case we need it later"
+      printf '%s\n' "${LINTER_OUTPUT_CONTENTS}" >"${OUTPUT_LINTER_FILE_PATH}"
+      if [[ "${REMOVE_ANSI_COLOR_CODES_FROM_OUTPUT}" == "true" ]] &&
+        ! RemoveAnsiColorCodesFromFile "${OUTPUT_LINTER_FILE_PATH}"; then
+        fatal "Error while removing ANSI color codes from ${OUTPUT_LINTER_FILE_PATH}"
+      fi
+    else
+      debug "${LINTER_OUTPUT} for ${FILE_TYPE} is empty"
+    fi
+  done
+
+  unset -n FILE_ARRAY
 }
 
 # We need this for parallel

@@ -42,12 +42,7 @@ ValidateValidationVariables
 # Now we can load linter command options because they have
 # dependencies on linter rules
 # shellcheck source=/dev/null
-source /action/lib/globals/linterCommandsOptions.sh
-
-# The slim image might not have this variable defined
-if [[ ! -v ARM_TTK_PSD1 ]]; then
-  ARM_TTK_PSD1="/usr/lib/microsoft/arm-ttk/arm-ttk.psd1"
-fi
+source lib/globals/linterCommandsOptions.sh
 
 # Source the file so we can load commands to compare them without redefining
 # each command. We're not interested in the actual values of those commands, but
@@ -58,14 +53,15 @@ source "lib/functions/linterCommands.sh"
 
 # Initialize the variables we're going to use to verify tests before running tests
 # because some tests modify LINTER_COMMANDS_xxx variables
-BASE_LINTER_COMMANDS_ARRAY_ANSIBLE=("${LINTER_COMMANDS_ARRAY_ANSIBLE[@]}")
+BASE_LINTER_COMMANDS_ARRAY_BASH_EXEC=("${LINTER_COMMANDS_ARRAY_BASH_EXEC[@]}")
 BASE_LINTER_COMMANDS_ARRAY_GITHUB_ACTIONS=("${LINTER_COMMANDS_ARRAY_GITHUB_ACTIONS[@]}")
 BASE_LINTER_COMMANDS_ARRAY_GIT_COMMITLINT=("${LINTER_COMMANDS_ARRAY_GIT_COMMITLINT[@]}")
 BASE_LINTER_COMMANDS_ARRAY_GITLEAKS=("${LINTER_COMMANDS_ARRAY_GITLEAKS[@]}")
-BASE_LINTER_COMMANDS_ARRAY_GO_MODULES=("${LINTER_COMMANDS_ARRAY_GO_MODULES[@]}")
 BASE_LINTER_COMMANDS_ARRAY_JAVA=("${LINTER_COMMANDS_ARRAY_JAVA[@]}")
-BASE_LINTER_COMMANDS_ARRAY_JSCPD=("${LINTER_COMMANDS_ARRAY_JSCPD[@]}")
+BASE_LINTER_COMMANDS_ARRAY_KUBERNETES_KUBECONFORM=("${LINTER_COMMANDS_ARRAY_KUBERNETES_KUBECONFORM[@]}")
+BASE_LINTER_COMMANDS_ARRAY_KUBERNETES_MARKDOWN=("${LINTER_COMMANDS_ARRAY_MARKDOWN[@]}")
 BASE_LINTER_COMMANDS_ARRAY_PERL=("${LINTER_COMMANDS_ARRAY_PERL[@]}")
+BASE_LINTER_COMMANDS_ARRAY_PRE_COMMIT=("${LINTER_COMMANDS_ARRAY_PRE_COMMIT[@]}")
 BASE_LINTER_COMMANDS_ARRAY_PRETTIER=("${PRETTIER_COMMAND[@]}")
 BASE_LINTER_COMMANDS_ARRAY_RUST_CLIPPY=("${LINTER_COMMANDS_ARRAY_RUST_CLIPPY[@]}")
 BASE_LINTER_COMMANDS_ARRAY_XML=("${LINTER_COMMANDS_ARRAY_XML[@]}")
@@ -90,49 +86,6 @@ function LinterCommandPresenceTest() {
   notice "${FUNCTION_NAME} PASS"
 }
 
-function IgnoreGitIgnoredFilesJscpdCommandTest() {
-  local FUNCTION_NAME
-  FUNCTION_NAME="${FUNCNAME[0]}"
-  info "${FUNCTION_NAME} start"
-
-  # shellcheck disable=SC2034
-  local IGNORE_GITIGNORED_FILES="true"
-
-  # Source the file again so it accounts for modifications
-  # shellcheck source=/dev/null
-  source "lib/functions/linterCommands.sh"
-
-  local EXPECTED_COMMAND=("${BASE_LINTER_COMMANDS_ARRAY_JSCPD[@]}" "${JSCPD_GITIGNORE_OPTION}")
-
-  if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_JSCPD" "EXPECTED_COMMAND"; then
-    fatal "${FUNCTION_NAME} test failed"
-  fi
-
-  notice "${FUNCTION_NAME} PASS"
-}
-
-function JscpdCommandTest() {
-  local FUNCTION_NAME
-  FUNCTION_NAME="${FUNCNAME[0]}"
-  info "${FUNCTION_NAME} start"
-
-  # shellcheck disable=SC2034
-  local IGNORE_GITIGNORED_FILES="false"
-
-  # Source the file again so it accounts for modifications
-  # shellcheck source=/dev/null
-  source "lib/functions/linterCommands.sh"
-
-  # shellcheck disable=SC2034
-  local EXPECTED_COMMAND=("${BASE_LINTER_COMMANDS_ARRAY_JSCPD[@]}")
-
-  if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_JSCPD" "EXPECTED_COMMAND"; then
-    fatal "${FUNCTION_NAME} test failed"
-  fi
-
-  notice "${FUNCTION_NAME} PASS"
-}
-
 EnableCommitlintEditModeCommandTest() {
   local FUNCTION_NAME
   FUNCTION_NAME="${FUNCNAME[0]}"
@@ -146,9 +99,11 @@ EnableCommitlintEditModeCommandTest() {
   source "lib/functions/linterCommands.sh"
 
   local EXPECTED_COMMAND=("${BASE_LINTER_COMMANDS_ARRAY_GIT_COMMITLINT[@]}")
-  # remove the last argument because we replace it with COMMITLINT_EDIT_MODE_OPTIONS
+  # remove the last two options because we replace them with the expected ones.
+  unset "EXPECTED_COMMAND[-1]"
   unset "EXPECTED_COMMAND[-1]"
   EXPECTED_COMMAND+=("${COMMITLINT_EDIT_MODE_OPTIONS[@]}")
+  EXPECTED_COMMAND+=("${COMMITLINT_CWD_OPTIONS[@]}")
 
   if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_GIT_COMMITLINT" "EXPECTED_COMMAND"; then
     fatal "${FUNCTION_NAME} test failed"
@@ -169,7 +124,11 @@ EnableCommitlintStrictModeCommandTest() {
   # shellcheck source=/dev/null
   source "lib/functions/linterCommands.sh"
 
-  local EXPECTED_COMMAND=("${BASE_LINTER_COMMANDS_ARRAY_GIT_COMMITLINT[@]}" "${COMMITLINT_STRICT_MODE_OPTIONS[@]}")
+  local EXPECTED_COMMAND=("${BASE_LINTER_COMMANDS_ARRAY_GIT_COMMITLINT[@]}")
+  # remove the last two options because we replace them with the expected ones.
+  unset "EXPECTED_COMMAND[-1]"
+  EXPECTED_COMMAND+=("${COMMITLINT_STRICT_MODE_OPTIONS[@]}")
+  EXPECTED_COMMAND+=("${COMMITLINT_CWD_OPTIONS[@]}")
 
   if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_GIT_COMMITLINT" "EXPECTED_COMMAND"; then
     fatal "${FUNCTION_NAME} test failed"
@@ -187,18 +146,9 @@ function GitleaksCommandTest() {
   local EXPECTED_COMMAND=("${BASE_LINTER_COMMANDS_ARRAY_GITLEAKS[@]}")
 
   if [[ "${EXPECTED_GITLEAKS_LOG_LEVEL:-}" ]]; then
-    # The gitleaks command ends with an option to specify the path
-    # to the file to check, so we need to append the log option before that.
-    local GITLEAKS_FILE_PATH_OPTION="${EXPECTED_COMMAND[-1]}"
-
-    # Remove the file path option so we can append the log option
-    unset 'EXPECTED_COMMAND[-1]'
     # shellcheck disable=SC2034
     local GITLEAKS_LOG_LEVEL="${EXPECTED_GITLEAKS_LOG_LEVEL}"
     EXPECTED_COMMAND+=("${GITLEAKS_LOG_LEVEL_OPTIONS[@]}" "${EXPECTED_GITLEAKS_LOG_LEVEL}")
-
-    # Add the file path option back
-    EXPECTED_COMMAND+=("${GITLEAKS_FILE_PATH_OPTION}")
   fi
 
   # Source the file again so it accounts for modifications
@@ -227,47 +177,6 @@ function GitleaksCommandCustomLogLevelTest() {
 
   local EXPECTED_GITLEAKS_LOG_LEVEL="debug"
   GitleaksCommandTest
-
-  notice "${FUNCTION_NAME} PASS"
-}
-
-function InitInputConsumeCommandsTest() {
-  local FUNCTION_NAME
-  FUNCTION_NAME="${FUNCNAME[0]}"
-  info "${FUNCTION_NAME} start"
-
-  # shellcheck disable=SC2034
-  local EXPECTED_LINTER_COMMANDS_ARRAY_ANSIBLE=("${BASE_LINTER_COMMANDS_ARRAY_ANSIBLE[@]}" "${INPUT_CONSUME_COMMAND[@]}")
-  # shellcheck disable=SC2034
-  local EXPECTED_LINTER_COMMANDS_ARRAY_GO_MODULES=("${BASE_LINTER_COMMANDS_ARRAY_GO_MODULES[@]}" "${INPUT_CONSUME_COMMAND[@]}")
-
-  # Add some custom options to the Rust command to ensure that they are added before the "input consume" command
-  # shellcheck disable=SC2034
-  local RUST_CLIPPY_COMMAND_OPTIONS_ARRAY=("--verbose --help")
-  RUST_CLIPPY_COMMAND_OPTIONS="${RUST_CLIPPY_COMMAND_OPTIONS_ARRAY[*]}"
-
-  # Source the file again so it accounts for modifications
-  # shellcheck source=/dev/null
-  source "lib/functions/linterCommands.sh"
-
-  # shellcheck disable=SC2034
-  local EXPECTED_LINTER_COMMANDS_ARRAY_RUST_CLIPPY=("${BASE_LINTER_COMMANDS_ARRAY_RUST_CLIPPY[@]}" "${RUST_CLIPPY_COMMAND_OPTIONS_ARRAY[@]}" "${INPUT_CONSUME_COMMAND[@]}")
-
-  if ! InitInputConsumeCommands; then
-    fatal "Error while initializing GNU parallel input consume commands"
-  fi
-
-  if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_ANSIBLE" "EXPECTED_LINTER_COMMANDS_ARRAY_ANSIBLE"; then
-    fatal "${FUNCTION_NAME} test failed"
-  fi
-
-  if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_GO_MODULES" "EXPECTED_LINTER_COMMANDS_ARRAY_GO_MODULES"; then
-    fatal "${FUNCTION_NAME} test failed"
-  fi
-
-  if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_RUST_CLIPPY" "EXPECTED_LINTER_COMMANDS_ARRAY_RUST_CLIPPY"; then
-    fatal "${FUNCTION_NAME} test failed"
-  fi
 
   notice "${FUNCTION_NAME} PASS"
 }
@@ -381,16 +290,22 @@ function InitFixModeOptionsAndCommandsTest() {
   notice "${FUNCTION_NAME} PASS"
 }
 
-function InitPowerShellCommandTest() {
+BashExecIgnoreLibrariesTest() {
   local FUNCTION_NAME
   FUNCTION_NAME="${FUNCNAME[0]}"
   info "${FUNCTION_NAME} start"
 
   # shellcheck disable=SC2034
-  EXPECTED_LINTER_COMMANDS_ARRAY_POWERSHELL=(pwsh -NoProfile -NoLogo -Command "\"${LINTER_COMMANDS_ARRAY_POWERSHELL[*]}; if (\\\${Error}.Count) { exit 1 }\"")
-  InitPowerShellCommand
+  local BASH_EXEC_IGNORE_LIBRARIES="true"
 
-  if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_POWERSHELL" "EXPECTED_LINTER_COMMANDS_ARRAY_POWERSHELL"; then
+  # shellcheck disable=SC2034
+  local EXPECTED_LINTER_COMMANDS_ARRAY_BASH_EXEC=("${BASE_LINTER_COMMANDS_ARRAY_BASH_EXEC[@]}" "true")
+
+  # Source the file again so it accounts for modifications
+  # shellcheck source=/dev/null
+  source "lib/functions/linterCommands.sh"
+
+  if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_BASH_EXEC" "EXPECTED_LINTER_COMMANDS_ARRAY_BASH_EXEC"; then
     fatal "${FUNCTION_NAME} test failed"
   fi
 
@@ -416,7 +331,11 @@ CommandOptionsTest() {
   # shellcheck disable=SC2034
   local JAVA_JVM_COMMAND_ARGS="${ARGS_TO_ADD}"
   # shellcheck disable=SC2034
+  local KUBERNETES_KUBECONFORM_OPTIONS="${ARGS_TO_ADD}"
+  # shellcheck disable=SC2034
   local PERL_PERLCRITIC_OPTIONS="${ARGS_TO_ADD}"
+  # shellcheck disable=SC2034
+  local PRE_COMMIT_COMMAND_ARGS="${ARGS_TO_ADD}"
   # shellcheck disable=SC2034
   local PRETTIER_COMMAND_OPTIONS="${ARGS_TO_ADD}"
   # shellcheck disable=SC2034
@@ -428,10 +347,7 @@ CommandOptionsTest() {
 
   # shellcheck disable=SC2034
   local EXPECTED_LINTER_COMMANDS_ARRAY_GITLEAKS=("${BASE_LINTER_COMMANDS_ARRAY_GITLEAKS[@]}")
-  # remove the last argument (--source) because we add command arguments before --source
-  unset "EXPECTED_LINTER_COMMANDS_ARRAY_GITLEAKS[-1]"
-  # also add the --source argument that we removed before
-  AddOptionsToCommand "EXPECTED_LINTER_COMMANDS_ARRAY_GITLEAKS" "${GITLEAKS_COMMAND_OPTIONS} --source"
+  AddOptionsToCommand "EXPECTED_LINTER_COMMANDS_ARRAY_GITLEAKS" "${GITLEAKS_COMMAND_OPTIONS}"
   if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_GITLEAKS" "EXPECTED_LINTER_COMMANDS_ARRAY_GITLEAKS"; then
     fatal "${FUNCTION_NAME} test failed"
   fi
@@ -454,6 +370,13 @@ CommandOptionsTest() {
   fi
 
   # shellcheck disable=SC2034
+  local EXPECTED_LINTER_COMMANDS_ARRAY_KUBERNETES_KUBECONFORM=("${BASE_LINTER_COMMANDS_ARRAY_KUBERNETES_KUBECONFORM[@]}")
+  AddOptionsToCommand "EXPECTED_LINTER_COMMANDS_ARRAY_KUBERNETES_KUBECONFORM" "${KUBERNETES_KUBECONFORM_OPTIONS}"
+  if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_KUBERNETES_KUBECONFORM" "EXPECTED_LINTER_COMMANDS_ARRAY_KUBERNETES_KUBECONFORM"; then
+    fatal "${FUNCTION_NAME} test failed"
+  fi
+
+  # shellcheck disable=SC2034
   local EXPECTED_LINTER_COMMANDS_ARRAY_PERL=("${BASE_LINTER_COMMANDS_ARRAY_PERL[@]}")
   AddOptionsToCommand "EXPECTED_LINTER_COMMANDS_ARRAY_PERL" "${PERL_PERLCRITIC_OPTIONS}"
   if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_PERL" "EXPECTED_LINTER_COMMANDS_ARRAY_PERL"; then
@@ -468,11 +391,82 @@ CommandOptionsTest() {
   fi
 
   # shellcheck disable=SC2034
+  local EXPECTED_LINTER_COMMANDS_ARRAY_PRE_COMMIT=("${BASE_LINTER_COMMANDS_ARRAY_PRE_COMMIT[@]}")
+  AddOptionsToCommand "EXPECTED_LINTER_COMMANDS_ARRAY_PRE_COMMIT" "${PRE_COMMIT_COMMAND_ARGS}"
+  if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_PRE_COMMIT" "EXPECTED_LINTER_COMMANDS_ARRAY_PRE_COMMIT"; then
+    fatal "${FUNCTION_NAME} test failed"
+  fi
+
+  # shellcheck disable=SC2034
   local EXPECTED_LINTER_COMMANDS_ARRAY_RUST_CLIPPY=("${BASE_LINTER_COMMANDS_ARRAY_RUST_CLIPPY[@]}")
   AddOptionsToCommand "EXPECTED_LINTER_COMMANDS_ARRAY_RUST_CLIPPY" "${RUST_CLIPPY_COMMAND_OPTIONS}"
   if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_RUST_CLIPPY" "EXPECTED_LINTER_COMMANDS_ARRAY_RUST_CLIPPY"; then
     fatal "${FUNCTION_NAME} test failed"
   fi
+
+  notice "${FUNCTION_NAME} PASS"
+}
+
+PreCommitCommandTest() {
+  local FUNCTION_NAME
+  FUNCTION_NAME="${FUNCNAME[0]}"
+  info "${FUNCTION_NAME} start"
+
+  local EXPECTED_LINTER_COMMANDS_ARRAY_PRE_COMMIT
+  local VALIDATE_ALL_CODEBASE
+
+  local BASE_LINTER_COMMANDS_ARRAY_PRE_COMMIT_WITHOUT_FALLBACK_OPTION=("${BASE_LINTER_COMMANDS_ARRAY_PRE_COMMIT[@]}")
+  # Remove the last array element because Super-linter initializes the pre-commit command with the PRE_COMMIT_RUN_ALL_FILES_OPTION as a fallback option
+  unset "BASE_LINTER_COMMANDS_ARRAY_PRE_COMMIT_WITHOUT_FALLBACK_OPTION[-1]"
+
+  # shellcheck disable=SC2034
+  EXPECTED_LINTER_COMMANDS_ARRAY_PRE_COMMIT=("${BASE_LINTER_COMMANDS_ARRAY_PRE_COMMIT_WITHOUT_FALLBACK_OPTION[@]}" "${PRE_COMMIT_ALL_FILES_OPTION[@]}")
+  # Source the file again so it accounts for modifications
+  # shellcheck source=/dev/null
+  source "lib/functions/linterCommands.sh"
+  if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_PRE_COMMIT" "EXPECTED_LINTER_COMMANDS_ARRAY_PRE_COMMIT"; then
+    fatal "LINTER_COMMANDS_ARRAY_PRE_COMMIT doesn't match the expected value when VALIDATE_ALL_CODEBASE is ${VALIDATE_ALL_CODEBASE:-"not initialized"}"
+  fi
+
+  # shellcheck disable=SC2034
+  VALIDATE_ALL_CODEBASE=
+  # shellcheck disable=SC2034
+  EXPECTED_LINTER_COMMANDS_ARRAY_PRE_COMMIT=("${BASE_LINTER_COMMANDS_ARRAY_PRE_COMMIT_WITHOUT_FALLBACK_OPTION[@]}" "${PRE_COMMIT_ALL_FILES_OPTION[@]}")
+  # Source the file again so it accounts for modifications
+  # shellcheck source=/dev/null
+  source "lib/functions/linterCommands.sh"
+  if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_PRE_COMMIT" "EXPECTED_LINTER_COMMANDS_ARRAY_PRE_COMMIT"; then
+    fatal "LINTER_COMMANDS_ARRAY_PRE_COMMIT doesn't match the expected value when VALIDATE_ALL_CODEBASE is ${VALIDATE_ALL_CODEBASE:-"not set"}"
+  fi
+
+  # shellcheck disable=SC2034
+  VALIDATE_ALL_CODEBASE="true"
+  # shellcheck disable=SC2034
+  EXPECTED_LINTER_COMMANDS_ARRAY_PRE_COMMIT=("${BASE_LINTER_COMMANDS_ARRAY_PRE_COMMIT_WITHOUT_FALLBACK_OPTION[@]}" "${PRE_COMMIT_ALL_FILES_OPTION[@]}")
+  # Source the file again so it accounts for modifications
+  # shellcheck source=/dev/null
+  source "lib/functions/linterCommands.sh"
+  if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_PRE_COMMIT" "EXPECTED_LINTER_COMMANDS_ARRAY_PRE_COMMIT"; then
+    fatal "LINTER_COMMANDS_ARRAY_PRE_COMMIT doesn't match the expected value when VALIDATE_ALL_CODEBASE is ${VALIDATE_ALL_CODEBASE:-"not set"}"
+  fi
+
+  VALIDATE_ALL_CODEBASE="false"
+  # shellcheck disable=SC2034
+  GITHUB_SHA="to-ref"
+  GITHUB_BEFORE_SHA="from-ref"
+  EXPECTED_LINTER_COMMANDS_ARRAY_PRE_COMMIT=("${BASE_LINTER_COMMANDS_ARRAY_PRE_COMMIT_WITHOUT_FALLBACK_OPTION[@]}")
+  EXPECTED_LINTER_COMMANDS_ARRAY_PRE_COMMIT+=("${PRE_COMMIT_FROM_REF_OPTIONS[@]}" "${GITHUB_BEFORE_SHA}")
+  EXPECTED_LINTER_COMMANDS_ARRAY_PRE_COMMIT+=("${PRE_COMMIT_TO_REF_OPTIONS[@]}" "${GITHUB_SHA}")
+  # Source the file again so it accounts for modifications
+  # shellcheck source=/dev/null
+  source "lib/functions/linterCommands.sh"
+  if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_PRE_COMMIT" "EXPECTED_LINTER_COMMANDS_ARRAY_PRE_COMMIT"; then
+    fatal "LINTER_COMMANDS_ARRAY_PRE_COMMIT doesn't match the expected value when VALIDATE_ALL_CODEBASE is ${VALIDATE_ALL_CODEBASE:-"not set"}"
+  fi
+
+  unset VALIDATE_ALL_CODEBASE
+  unset GITHUB_BEFORE_SHA
+  unset GITHUB_SHA
 
   notice "${FUNCTION_NAME} PASS"
 }
@@ -498,16 +492,47 @@ AddOptionsToCommandTest() {
   notice "${FUNCTION_NAME} PASS"
 }
 
+MarkdownCustomRuleGlobsTest() {
+  local FUNCTION_NAME
+  FUNCTION_NAME="${FUNCNAME[0]}"
+  info "${FUNCTION_NAME} start"
+
+  unset LINTER_RULES_PATH
+
+  local MARKDOWN_CUSTOM_RULE_GLOBS
+  # shellcheck disable=SC2034
+  MARKDOWN_CUSTOM_RULE_GLOBS="custom-rules/*.js"
+
+  # shellcheck disable=SC2034
+  local EXPECTED_LINTER_COMMANDS_ARRAY_MARKDOWN=(
+    "${BASE_LINTER_COMMANDS_ARRAY_KUBERNETES_MARKDOWN[@]}"
+    "-r" "$(dirname "${MARKDOWN_LINTER_RULES}")/${MARKDOWN_CUSTOM_RULE_GLOBS}"
+  )
+
+  # Initialize linter commands again
+  # shellcheck source=/dev/null
+  source "lib/functions/linterCommands.sh"
+
+  if ! AssertArraysElementsContentMatch "LINTER_COMMANDS_ARRAY_MARKDOWN" "EXPECTED_LINTER_COMMANDS_ARRAY_MARKDOWN"; then
+    fatal "LINTER_COMMANDS_ARRAY_MARKDOWN doesn't match the expected value when MARKDOWN_CUSTOM_RULE_GLOBS is ${MARKDOWN_CUSTOM_RULE_GLOBS} and LINTER_RULES_PATH is not set"
+  fi
+
+  # Initialize the rules again because we unset LINTER_RULES_PATH at the beginning of the test
+  # shellcheck source=/dev/null
+  source "lib/globals/linterRules.sh"
+
+  notice "${FUNCTION_NAME} PASS"
+}
+
 LinterCommandPresenceTest
-IgnoreGitIgnoredFilesJscpdCommandTest
-JscpdCommandTest
 EnableCommitlintEditModeCommandTest
 EnableCommitlintStrictModeCommandTest
 GitleaksCommandTest
 GitleaksCommandCustomLogLevelTest
-InitInputConsumeCommandsTest
 InitFixModeOptionsAndCommandsTest
-InitPowerShellCommandTest
+BashExecIgnoreLibrariesTest
 CommandOptionsTest
+PreCommitCommandTest
 AddOptionsToCommandTest
 AddDebugOptionsToCommandsTest
+MarkdownCustomRuleGlobsTest
