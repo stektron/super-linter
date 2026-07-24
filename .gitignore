@@ -104,6 +104,3 @@ github-step-summary.md
 
 # GitHub Actions configuration files
 github_conf
-
-# Gradle
-.gradle/
