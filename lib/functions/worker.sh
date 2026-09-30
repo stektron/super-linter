@@ -102,7 +102,8 @@ function LintCodebase() {
   if [[ "${FILE_TYPE}" == "ANSIBLE" ]] ||
     [[ "${FILE_TYPE}" == "ARM" ]] ||
     [[ "${FILE_TYPE}" == "BASH_EXEC" ]] ||
-    [[ "${FILE_TYPE}" == "BICEP" ]] ||
+    [[ "${FILE_TYPE}" == "BICEP_FORMAT" ]] ||
+    [[ "${FILE_TYPE}" == "BICEP_LINT" ]] ||
     [[ "${FILE_TYPE}" == "CHECKOV" ]] ||
     [[ "${FILE_TYPE}" == "CLOJURE" ]] ||
     [[ "${FILE_TYPE}" == "CSHARP" ]] ||
@@ -135,7 +136,8 @@ function LintCodebase() {
   # - {/} basename of the input lint
   # - {//} dirname of input line
 
-  if [[ ${FILE_TYPE} == "BICEP" ]] ||
+  if [[ ${FILE_TYPE} == "BICEP_FORMAT" ]] ||
+    [[ ${FILE_TYPE} == "BICEP_LINT" ]] ||
     [[ ${FILE_TYPE} == "CSHARP" ]] ||
     [[ (${FILE_TYPE} == "R" && -f "$(dirname "${FILE}")/.lintr") ]] ||
     [[ ${FILE_TYPE} == "KOTLIN" ]] ||

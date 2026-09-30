@@ -496,7 +496,7 @@ control "super-linter-validate-files" do
     "/action/lib/.automation/actionlint.yml",
     "/action/lib/.automation/.ansible-lint.yml",
     "/action/lib/.automation/.arm-ttk.psd1",
-    "/action/lib/.automation/.bicep.json",
+    "/action/lib/.automation/bicepconfig.json",
     "/action/lib/.automation/.cfnlintrc.yml",
     "/action/lib/.automation/.checkov.yaml",
     "/action/lib/.automation/.chktexrc",

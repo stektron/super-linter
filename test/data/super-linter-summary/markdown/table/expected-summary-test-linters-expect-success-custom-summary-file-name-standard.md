@@ -10,7 +10,8 @@
 | ARM                          | Pass ✅           |
 | BASH                         | Pass ✅           |
 | BASH_EXEC                    | Pass ✅           |
-| BICEP                        | Pass ✅           |
+| BICEP_FORMAT                 | Pass ✅           |
+| BICEP_LINT                   | Pass ✅           |
 | BIOME_FORMAT                 | Pass ✅           |
 | BIOME_LINT                   | Pass ✅           |
 | CHECKOV                      | Pass ✅           |
