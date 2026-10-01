@@ -689,7 +689,8 @@ UpdateLoopsForImage() {
     #############################################
     REMOVE_ARRAY=(
       "ARM"
-      "BICEP"
+      "BICEP_FORMAT"
+      "BICEP_LINT"
       "CSHARP"
       "DOTNET_SLN_FORMAT_ANALYZERS"
       "DOTNET_SLN_FORMAT_STYLE"
